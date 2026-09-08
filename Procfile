@@ -1,1 +1,1 @@
-web: ATOMIC_PORT=$PORT target/release/atomic-server
+web: target/release/auth-proxy
