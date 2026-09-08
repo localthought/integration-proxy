@@ -27,20 +27,20 @@ Authorization Code flow with PKCE.
 - `GET /catalog/{platform}.yaml` — returns the OpenAPI document for that
   platform with its configured overlays applied.
 - `GET /connect?redirect_uri=<url>` — a third party (e.g. atomic-server)
-  sends the user here to obtain their user secret. If the user isn't signed
+  sends the user here to obtain their tenant secret. If the user isn't signed
   in yet, they're sent to log in first and brought back here afterwards.
   Once signed in, they see a consent screen showing `redirect_uri` and an
   "OK" button.
 - `POST /connect` — submitted by the consent screen's form. Redirects the
-  browser to `redirect_uri` with the user's secret attached as
+  browser to `redirect_uri` with the tenant's secret attached as
   `?secret=...`.
 - `/proxy` — called by the third party with `Authorization: Bearer
-  <secret>`. Returns `{"ok": true}` if the secret verifies, or `401` with
+  <secret>`. Returns `{"ok": true}` if the tenant secret verifies, or `401` with
   an error body otherwise. Verification is a pure function of
   `SERVER_SECRET`, so it works without looking anything up.
 
-Once signed in, the home page also displays a **user secret**: a value
-deterministically derived from the account's Google identity and the
+Once signed in, the home page also displays a **tenant secret**: a value
+deterministically derived from the tenant identity and the
 server's `SERVER_SECRET`. It's meant to be copied into the environment of
 another service (e.g. an atomic-server instance running the
 `feat/api-plugins` branch) so that service can later authenticate requests
@@ -73,7 +73,7 @@ directly):
 | `BASE_URL`             | no       | Public URL of the server, no trailing slash. Defaults to `http://localhost:8080`. Must match the redirect URI registered with Google. |
 | `PORT`                 | no       | Port to listen on. Defaults to `8080`.                                      |
 | `SESSION_SECRET`       | no       | Secret used to encrypt session cookies. If unset, a random key is generated at startup and sessions are invalidated whenever the process restarts. Set this to a persistent random value in production. |
-| `SERVER_SECRET`        | yes      | Secret used to deterministically derive each user's per-identity "user secret" (see above). Must stay constant across restarts and instances. |
+| `SERVER_SECRET`        | yes      | Secret used to deterministically derive each tenant's secret (see above). Must stay constant across restarts and instances. |
 | `CATALOG_PATH`         | no       | Path to the catalog configuration. Defaults to `catalog.yaml`. |
 
 ## Catalog
@@ -118,9 +118,9 @@ CI runs the same checks on every push and pull request (see
 - Cookies are marked `Secure`, so in production `BASE_URL` must use
   `https://`. `http://localhost` works during local development because
   browsers treat `localhost` as a secure context.
-- The per-user secret is likewise never stored: it's an HMAC of the
-  account's Google identity keyed by `SERVER_SECRET`, so any instance that
-  knows `SERVER_SECRET` can derive or verify it on the fly.
+- The tenant secret is likewise never stored: it's an HMAC of the tenant
+  identity keyed by `SERVER_SECRET`, so any instance that knows
+  `SERVER_SECRET` can derive or verify it on the fly.
 - The pending `/connect` redirect (used to return to `/connect` after a
   login detour) is held in a short-lived encrypted cookie
   (`connect_redirect`), the same pattern as `oauth_state`.

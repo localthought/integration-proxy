@@ -4,8 +4,8 @@ use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Deterministically derives a per-identity secret from the server secret
-/// and a stable identity (the Google account's `sub` claim).
+/// Deterministically derives a per-tenant secret from the server secret
+/// and a stable tenant identity.
 ///
 /// The secret is self-describing: it encodes the identity alongside an HMAC
 /// over it, so [`verify`] can check a presented secret is genuine without

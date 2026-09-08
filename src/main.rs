@@ -4,7 +4,7 @@ mod config;
 mod proxy;
 mod session;
 mod templates;
-mod user_secret;
+mod tenant_secret;
 
 use axum::{
     extract::{FromRef, State},
@@ -106,11 +106,11 @@ async fn main() {
 
 async fn home(State(state): State<AppState>, jar: PrivateCookieJar) -> Html<String> {
     let user = session::read_session(&jar);
-    let user_secret = user
+    let tenant_secret = user
         .as_ref()
-        .map(|u| user_secret::derive(&state.server_secret, &u.google_sub));
+        .map(|u| tenant_secret::derive(&state.server_secret, &u.google_sub));
     Html(templates::render_home(
         user.as_ref(),
-        user_secret.as_deref(),
+        tenant_secret.as_deref(),
     ))
 }
