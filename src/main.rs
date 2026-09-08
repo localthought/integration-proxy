@@ -1,4 +1,5 @@
 mod auth;
+mod catalog;
 mod config;
 mod proxy;
 mod session;
@@ -25,6 +26,7 @@ struct AppState {
     http_client: reqwest::Client,
     key: Key,
     server_secret: String,
+    catalog: catalog::Catalog,
 }
 
 impl FromRef<AppState> for Key {
@@ -59,6 +61,15 @@ async fn main() {
         }
     };
 
+    let catalog = match catalog::Catalog::load(&config.catalog_path, &reqwest::Client::new()).await
+    {
+        Ok(catalog) => catalog,
+        Err(err) => {
+            eprintln!("catalog configuration error: {err}");
+            std::process::exit(1);
+        }
+    };
+
     let port = config.port;
     let server_secret = config.server_secret.clone();
     let state = AppState {
@@ -66,6 +77,7 @@ async fn main() {
         http_client: reqwest::Client::new(),
         key,
         server_secret,
+        catalog,
     };
 
     let app = Router::new()
@@ -78,6 +90,8 @@ async fn main() {
             get(proxy::connect_page).post(proxy::connect_confirm),
         )
         .route("/proxy", axum::routing::any(proxy::proxy))
+        .route("/catalog", get(catalog::list))
+        .route("/catalog/{file}", get(catalog::document))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

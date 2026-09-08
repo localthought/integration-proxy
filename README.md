@@ -23,6 +23,9 @@ Authorization Code flow with PKCE.
   token, fetches the user's profile from Google's userinfo endpoint, and
   sets the session cookie.
 - `POST /auth/logout` — clears the session cookie.
+- `GET /catalog` — lists the available integration platform names.
+- `GET /catalog/{platform}.yaml` — returns the OpenAPI document for that
+  platform with its configured overlays applied.
 - `GET /connect?redirect_uri=<url>` — a third party (e.g. atomic-server)
   sends the user here to obtain their user secret. If the user isn't signed
   in yet, they're sent to log in first and brought back here afterwards.
@@ -71,6 +74,17 @@ directly):
 | `PORT`                 | no       | Port to listen on. Defaults to `8080`.                                      |
 | `SESSION_SECRET`       | no       | Secret used to encrypt session cookies. If unset, a random key is generated at startup and sessions are invalidated whenever the process restarts. Set this to a persistent random value in production. |
 | `SERVER_SECRET`        | yes      | Secret used to deterministically derive each user's per-identity "user secret" (see above). Must stay constant across restarts and instances. |
+| `CATALOG_PATH`         | no       | Path to the catalog configuration. Defaults to `catalog.yaml`. |
+
+## Catalog
+
+`catalog.yaml` is the source of the integration catalog. Each platform names
+one pinned OpenAPI document and zero or more pinned Overlay Specification
+documents. At startup the proxy downloads those HTTPS sources, applies each
+overlay's `update` actions, and keeps the resulting YAML in memory. Edit this
+file and restart the service to add, remove, or update a platform. The default
+catalog pins GitHub Issues and Google Calendar to the revisions requested in
+issue #6.
 
 ### 3. Run it
 

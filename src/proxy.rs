@@ -124,12 +124,14 @@ mod tests {
             port: 8080,
             session_secret: None,
             server_secret: server_secret.to_string(),
+            catalog_path: "catalog.yaml".to_string(),
         };
         AppState {
             oauth_client: crate::auth::build_client(&config).unwrap(),
             http_client: reqwest::Client::new(),
             key: Key::generate(),
             server_secret: config.server_secret,
+            catalog: crate::catalog::Catalog::default(),
         }
     }
 
