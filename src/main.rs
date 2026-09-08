@@ -1,6 +1,8 @@
 mod auth;
 mod catalog;
 mod config;
+#[allow(dead_code)] // used by the provider OAuth routes introduced with issue #9
+mod providers;
 mod proxy;
 mod security;
 mod session;
