@@ -183,7 +183,7 @@ pub async fn callback(
         refresh_token: token.refresh_token,
         expires_in: token.expires_in,
     };
-    let aad = format!("{name}.{tenant_id}.{user_id}");
+    let aad = "connection-credential-v1";
     let Ok(envelope) = security.seal(&serde_json::to_vec(&credential).unwrap(), aad.as_bytes())
     else {
         return error();

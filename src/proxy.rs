@@ -3,7 +3,8 @@ use rand::RngCore;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
-    extract::{Form, Query, State},
+    body::Bytes,
+    extract::{Form, Path, Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
     Json,
@@ -202,6 +203,105 @@ pub async fn proxy(State(state): State<AppState>, headers: HeaderMap) -> Respons
         )
             .into_response(),
     }
+}
+
+#[derive(Deserialize)]
+struct Credential {
+    provider: String,
+    tenant_id: String,
+    user_id: String,
+    access_token: String,
+    #[serde(rename = "refresh_token")]
+    _refresh_token: Option<String>,
+    #[serde(rename = "expires_in")]
+    _expires_in: Option<u64>,
+}
+
+pub async fn forward(
+    Path((platform, path)): Path<(String, String)>,
+    State(state): State<AppState>,
+    method: axum::http::Method,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if body.len() > 1_048_576 {
+        return (StatusCode::PAYLOAD_TOO_LARGE, "request body is too large").into_response();
+    }
+    let Some(code) = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+    else {
+        return (StatusCode::UNAUTHORIZED, "missing connection code").into_response();
+    };
+    let Some(security) = &state.security else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "security service unavailable",
+        )
+            .into_response();
+    };
+    let Ok(Some(envelope)) = security.take_connection_code(code).await else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            "invalid or expired connection code",
+        )
+            .into_response();
+    };
+    let Some(plaintext) = security.open(&envelope, b"connection-credential-v1") else {
+        return (StatusCode::UNAUTHORIZED, "invalid connection code").into_response();
+    };
+    let Ok(credential) = serde_json::from_slice::<Credential>(&plaintext) else {
+        return (StatusCode::UNAUTHORIZED, "invalid connection code").into_response();
+    };
+    if credential.provider != platform
+        || security.is_revoked(&credential.tenant_id, &credential.user_id)
+    {
+        return (StatusCode::FORBIDDEN, "credential is not permitted").into_response();
+    }
+    let request_path = format!("/{path}");
+    let Some(mut target) = state
+        .catalog
+        .allows(&platform, method.as_str(), &request_path)
+    else {
+        return (
+            StatusCode::NOT_FOUND,
+            "method or path is not in the catalog",
+        )
+            .into_response();
+    };
+    target.set_path(&request_path);
+    let mut request = state
+        .http_client
+        .request(method, target)
+        .bearer_auth(credential.access_token);
+    if let Some(content_type) = headers.get(header::CONTENT_TYPE) {
+        request = request.header(header::CONTENT_TYPE, content_type);
+    }
+    let upstream = match request.body(body).send().await {
+        Ok(response) => response,
+        Err(_) => return (StatusCode::BAD_GATEWAY, "upstream request failed").into_response(),
+    };
+    let status = upstream.status();
+    let content_type = upstream.headers().get(header::CONTENT_TYPE).cloned();
+    let bytes = match upstream.bytes().await {
+        Ok(bytes) if bytes.len() <= 10_485_760 => bytes,
+        _ => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                "upstream response failed or was too large",
+            )
+                .into_response()
+        }
+    };
+    let mut response = Response::new(bytes.into());
+    *response.status_mut() = status;
+    if let Some(content_type) = content_type {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_TYPE, content_type);
+    }
+    response
 }
 
 #[derive(Debug)]

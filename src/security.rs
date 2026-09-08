@@ -127,4 +127,8 @@ impl Security {
         self.database.execute("INSERT INTO connection_codes (code, envelope, expires_at) VALUES ($1,$2,NOW() + INTERVAL '5 minutes')", &[&code, &envelope]).await.map_err(|e| e.to_string())?;
         Ok(())
     }
+
+    pub async fn take_connection_code(&self, code: &str) -> Result<Option<String>, String> {
+        self.database.query_opt("DELETE FROM connection_codes WHERE code = $1 AND expires_at > NOW() RETURNING envelope", &[&code]).await.map_err(|e| e.to_string()).map(|row| row.map(|r| r.get(0)))
+    }
 }

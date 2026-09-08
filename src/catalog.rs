@@ -73,9 +73,38 @@ impl Catalog {
     pub fn names(&self) -> Vec<String> {
         self.documents.keys().cloned().collect()
     }
+    pub fn allows(&self, platform: &str, method: &str, path: &str) -> Option<url::Url> {
+        let document: Value = serde_yaml::from_str(self.documents.get(platform)?).ok()?;
+        let server = document
+            .get("servers")?
+            .as_array()?
+            .first()?
+            .get("url")?
+            .as_str()?;
+        let paths = document.get("paths")?.as_object()?;
+        let template = paths.keys().find(|template| path_matches(template, path))?;
+        if !paths
+            .get(template)?
+            .get(method.to_ascii_lowercase())?
+            .is_object()
+        {
+            return None;
+        }
+        url::Url::parse(server).ok()
+    }
     fn get(&self, platform: &str) -> Option<&str> {
         self.documents.get(platform).map(String::as_str)
     }
+}
+
+fn path_matches(template: &str, path: &str) -> bool {
+    let left: Vec<_> = template.trim_matches('/').split('/').collect();
+    let right: Vec<_> = path.trim_matches('/').split('/').collect();
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(a, b)| (a.starts_with('{') && a.ends_with('}')) || *a == b)
 }
 
 async fn fetch_yaml(client: &reqwest::Client, url: &str) -> Result<String, String> {
