@@ -79,6 +79,16 @@ directly):
 | `SESSION_SECRET`       | no       | Secret used to encrypt session cookies. If unset, a random key is generated at startup and sessions are invalidated whenever the process restarts. Set this to a persistent random value in production. |
 | `SERVER_SECRET`        | yes      | Secret used to deterministically derive each tenant's secret (see above). Must stay constant across restarts and instances. |
 | `CATALOG_PATH`         | no       | Path to the catalog configuration. Defaults to `catalog.yaml`. |
+| `DATABASE_URL`          | yes      | PostgreSQL connection URL. Stores short-lived, consumed challenge nonces to prevent replay. |
+| `ENCRYPTION_KEY`        | yes      | Base64url-encoded, random 32-byte key for versioned XChaCha20-Poly1305 credential envelopes. |
+| `REVOKED_SUBJECTS`      | no       | Comma-separated tenant and user IDs denied access. |
+
+OAuth credentials are provider-specific. For a catalog platform named
+`google-calendar`, configure `OAUTH_GOOGLE_CALENDAR_CLIENT_ID` and
+`OAUTH_GOOGLE_CALENDAR_CLIENT_SECRET`; its callback URI is
+`<BASE_URL>/oauth/google-calendar/callback`. Provider names use lowercase
+letters, digits, and hyphens, and are converted to uppercase with hyphens
+replaced by underscores for environment-variable names.
 
 ## Catalog
 

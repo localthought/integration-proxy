@@ -2,6 +2,7 @@ mod auth;
 mod catalog;
 mod config;
 mod proxy;
+mod security;
 mod session;
 mod templates;
 mod tenant_secret;
@@ -27,6 +28,7 @@ struct AppState {
     key: Key,
     server_secret: String,
     catalog: catalog::Catalog,
+    security: Option<security::Security>,
 }
 
 impl FromRef<AppState> for Key {
@@ -69,6 +71,19 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    let security = match security::Security::connect(
+        &config.database_url,
+        &config.encryption_key,
+        config.revoked_subjects.clone(),
+    )
+    .await
+    {
+        Ok(security) => security,
+        Err(err) => {
+            eprintln!("security configuration error: {err}");
+            std::process::exit(1);
+        }
+    };
 
     let port = config.port;
     let server_secret = config.server_secret.clone();
@@ -78,6 +93,7 @@ async fn main() {
         key,
         server_secret,
         catalog,
+        security: Some(security),
     };
 
     let app = Router::new()
