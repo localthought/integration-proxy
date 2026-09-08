@@ -2,9 +2,10 @@ mod auth;
 mod config;
 mod session;
 mod templates;
+mod user_secret;
 
 use axum::{
-    extract::FromRef,
+    extract::{FromRef, State},
     response::Html,
     routing::{get, post},
     Router,
@@ -22,6 +23,7 @@ struct AppState {
     oauth_client: BasicClient,
     http_client: reqwest::Client,
     key: Key,
+    server_secret: String,
 }
 
 impl FromRef<AppState> for Key {
@@ -57,10 +59,12 @@ async fn main() {
     };
 
     let port = config.port;
+    let server_secret = config.server_secret.clone();
     let state = AppState {
         oauth_client,
         http_client: reqwest::Client::new(),
         key,
+        server_secret,
     };
 
     let app = Router::new()
@@ -80,7 +84,13 @@ async fn main() {
     axum::serve(listener, app).await.expect("server error");
 }
 
-async fn home(jar: PrivateCookieJar) -> Html<String> {
+async fn home(State(state): State<AppState>, jar: PrivateCookieJar) -> Html<String> {
     let user = session::read_session(&jar);
-    Html(templates::render_home(user.as_ref()))
+    let user_secret = user
+        .as_ref()
+        .map(|u| user_secret::derive(&state.server_secret, &u.google_sub));
+    Html(templates::render_home(
+        user.as_ref(),
+        user_secret.as_deref(),
+    ))
 }

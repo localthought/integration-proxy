@@ -24,6 +24,14 @@ Authorization Code flow with PKCE.
   sets the session cookie.
 - `POST /auth/logout` — clears the session cookie.
 
+Once signed in, the home page also displays a **user secret**: a value
+deterministically derived from the account's Google identity and the
+server's `SERVER_SECRET`. It's meant to be copied into the environment of
+another service (e.g. an atomic-server instance running the
+`feat/api-plugins` branch) so that service can later authenticate requests
+made on the user's behalf. Because it's derived rather than stored, the
+server never needs a database to look it up or validate it.
+
 All cookies are set with `axum-extra`'s `PrivateCookieJar`, which
 encrypts and authenticates their contents, so the server never needs to
 persist anything to recognize a returning user.
@@ -50,6 +58,7 @@ directly):
 | `BASE_URL`             | no       | Public URL of the server, no trailing slash. Defaults to `http://localhost:8080`. Must match the redirect URI registered with Google. |
 | `PORT`                 | no       | Port to listen on. Defaults to `8080`.                                      |
 | `SESSION_SECRET`       | no       | Secret used to encrypt session cookies. If unset, a random key is generated at startup and sessions are invalidated whenever the process restarts. Set this to a persistent random value in production. |
+| `SERVER_SECRET`        | yes      | Secret used to deterministically derive each user's per-identity "user secret" (see above). Must stay constant across restarts and instances. |
 
 ### 3. Run it
 
@@ -66,6 +75,7 @@ browser.
 cargo fmt --all       # format
 cargo clippy --all-targets --all-features -- -D warnings   # lint
 cargo build            # build
+cargo test             # test
 ```
 
 CI runs the same checks on every push and pull request (see
@@ -82,3 +92,6 @@ CI runs the same checks on every push and pull request (see
 - Cookies are marked `Secure`, so in production `BASE_URL` must use
   `https://`. `http://localhost` works during local development because
   browsers treat `localhost` as a secure context.
+- The per-user secret is likewise never stored: it's an HMAC of the
+  account's Google identity keyed by `SERVER_SECRET`, so any instance that
+  knows `SERVER_SECRET` can derive or verify it on the fly.

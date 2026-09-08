@@ -14,6 +14,10 @@ pub struct Config {
     /// random key is generated at startup: sessions stay valid for the life
     /// of the process but are invalidated on restart.
     pub session_secret: Option<String>,
+    /// Secret used to deterministically derive each user's per-identity
+    /// user secret (see `user_secret`). Must stay constant across restarts
+    /// and instances, or previously issued user secrets stop verifying.
+    pub server_secret: String,
 }
 
 impl Config {
@@ -28,6 +32,8 @@ impl Config {
             .and_then(|p| p.parse().ok())
             .unwrap_or(8080);
         let session_secret = env::var("SESSION_SECRET").ok();
+        let server_secret =
+            env::var("SERVER_SECRET").map_err(|_| "SERVER_SECRET must be set".to_string())?;
 
         Ok(Self {
             google_client_id,
@@ -35,6 +41,7 @@ impl Config {
             base_url,
             port,
             session_secret,
+            server_secret,
         })
     }
 
