@@ -67,6 +67,7 @@ pub struct CallbackParams {
 
 #[derive(Deserialize)]
 struct GoogleUserInfo {
+    sub: String,
     email: String,
     #[serde(default)]
     name: Option<String>,
@@ -110,6 +111,7 @@ pub async fn callback(
         .map_err(|_| AuthError::UserInfoFailed)?;
 
     let user = SessionUser::new(
+        userinfo.sub,
         userinfo.email.clone(),
         userinfo.name.unwrap_or(userinfo.email),
         userinfo.picture,
