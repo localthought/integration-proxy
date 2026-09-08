@@ -23,6 +23,18 @@ Authorization Code flow with PKCE.
   token, fetches the user's profile from Google's userinfo endpoint, and
   sets the session cookie.
 - `POST /auth/logout` — clears the session cookie.
+- `GET /connect?redirect_uri=<url>` — a third party (e.g. atomic-server)
+  sends the user here to obtain their user secret. If the user isn't signed
+  in yet, they're sent to log in first and brought back here afterwards.
+  Once signed in, they see a consent screen showing `redirect_uri` and an
+  "OK" button.
+- `POST /connect` — submitted by the consent screen's form. Redirects the
+  browser to `redirect_uri` with the user's secret attached as
+  `?secret=...`.
+- `/proxy` — called by the third party with `Authorization: Bearer
+  <secret>`. Returns `{"ok": true}` if the secret verifies, or `401` with
+  an error body otherwise. Verification is a pure function of
+  `SERVER_SECRET`, so it works without looking anything up.
 
 Once signed in, the home page also displays a **user secret**: a value
 deterministically derived from the account's Google identity and the
@@ -95,3 +107,6 @@ CI runs the same checks on every push and pull request (see
 - The per-user secret is likewise never stored: it's an HMAC of the
   account's Google identity keyed by `SERVER_SECRET`, so any instance that
   knows `SERVER_SECRET` can derive or verify it on the fly.
+- The pending `/connect` redirect (used to return to `/connect` after a
+  login detour) is held in a short-lived encrypted cookie
+  (`connect_redirect`), the same pattern as `oauth_state`.

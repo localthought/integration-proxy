@@ -118,6 +118,14 @@ pub async fn callback(
     );
     let jar = session::set_session(jar, &user);
 
+    // If login was triggered by a `/connect` request, send the user back
+    // there instead of the home page so they can finish the handshake.
+    if let Some(redirect_uri) = session::read_connect_redirect(&jar) {
+        let jar = session::clear_connect_redirect(jar);
+        let target = crate::proxy::connect_url(&redirect_uri);
+        return Ok((jar, Redirect::to(&target)));
+    }
+
     Ok((jar, Redirect::to("/")))
 }
 

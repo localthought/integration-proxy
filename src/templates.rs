@@ -15,6 +15,27 @@ pub fn render_home(user: Option<&SessionUser>, user_secret: Option<&str>) -> Str
     page(&body)
 }
 
+/// Renders the "connect this app" consent screen shown at `/connect` to a
+/// signed-in user, before they approve sharing their user secret.
+pub fn render_connect(redirect_uri: &str) -> String {
+    let body = format!(
+        r#"
+        <div class="card">
+          <h1>Connect this app?</h1>
+          <p>You'll be redirected back to:</p>
+          <p class="email">{redirect_uri}</p>
+          <form method="post" action="/connect">
+            <input type="hidden" name="redirect_uri" value="{redirect_uri}" />
+            <button class="button" type="submit">OK</button>
+          </form>
+        </div>
+        "#,
+        redirect_uri = escape(redirect_uri),
+    );
+
+    page(&body)
+}
+
 fn signed_out_body() -> String {
     r#"
     <div class="card">
@@ -182,5 +203,20 @@ mod tests {
     #[should_panic]
     fn render_home_panics_if_secret_missing_while_signed_in() {
         render_home(Some(&test_user()), None);
+    }
+
+    #[test]
+    fn connect_shows_the_redirect_target_and_a_confirm_form() {
+        let html = render_connect("https://example.com/callback");
+        assert!(html.contains("https://example.com/callback"));
+        assert!(html.contains(r#"action="/connect""#));
+        assert!(html.contains(r#"method="post""#));
+    }
+
+    #[test]
+    fn connect_escapes_the_redirect_uri() {
+        let html = render_connect("https://example.com/\"><script>alert(1)</script>");
+        assert!(!html.contains("<script>"));
+        assert!(html.contains("&lt;script&gt;"));
     }
 }

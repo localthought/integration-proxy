@@ -5,6 +5,7 @@ use time::Duration;
 
 pub const SESSION_COOKIE: &str = "session";
 pub const OAUTH_STATE_COOKIE: &str = "oauth_state";
+pub const CONNECT_REDIRECT_COOKIE: &str = "connect_redirect";
 const SESSION_LIFETIME_SECS: u64 = 60 * 60 * 24 * 7; // 7 days
 
 /// Everything the server knows about a logged-in user. This is the entire
@@ -103,6 +104,29 @@ pub struct OAuthState {
     pub pkce_verifier: String,
 }
 
+/// Stashes the `/connect` caller's `redirect_uri` in a short-lived private
+/// cookie so it survives a detour through the Google login flow, without
+/// any server-side storage.
+pub fn set_connect_redirect(jar: PrivateCookieJar, redirect_uri: &str) -> PrivateCookieJar {
+    let cookie = Cookie::build((CONNECT_REDIRECT_COOKIE, redirect_uri.to_string()))
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .secure(true)
+        .max_age(Duration::minutes(10))
+        .build();
+    jar.add(cookie)
+}
+
+pub fn read_connect_redirect(jar: &PrivateCookieJar) -> Option<String> {
+    jar.get(CONNECT_REDIRECT_COOKIE)
+        .map(|cookie| cookie.value().to_string())
+}
+
+pub fn clear_connect_redirect(jar: PrivateCookieJar) -> PrivateCookieJar {
+    jar.remove(Cookie::build(CONNECT_REDIRECT_COOKIE).path("/").build())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,5 +192,25 @@ mod tests {
 
         let jar = clear_oauth_state(jar);
         assert!(read_oauth_state(&jar).is_none());
+    }
+
+    #[test]
+    fn connect_redirect_round_trips_and_clears() {
+        let jar = PrivateCookieJar::new(Key::generate());
+        let jar = set_connect_redirect(jar, "https://example.com/callback");
+
+        assert_eq!(
+            read_connect_redirect(&jar),
+            Some("https://example.com/callback".to_string())
+        );
+
+        let jar = clear_connect_redirect(jar);
+        assert!(read_connect_redirect(&jar).is_none());
+    }
+
+    #[test]
+    fn connect_redirect_is_none_when_not_set() {
+        let jar = PrivateCookieJar::new(Key::generate());
+        assert!(read_connect_redirect(&jar).is_none());
     }
 }
