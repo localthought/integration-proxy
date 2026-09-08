@@ -38,6 +38,10 @@ Authorization Code flow with PKCE.
   <secret>`. Returns `{"ok": true}` if the tenant secret verifies, or `401` with
   an error body otherwise. Verification is a pure function of
   `SERVER_SECRET`, so it works without looking anything up.
+- `GET /session` — returns a timestamp and a challenge signed with
+  `SERVER_SECRET`. A tenant signs that challenge with its tenant secret and
+  supplies that response, a tenant-vouched `user_id`, and its signature when
+  opening `/connect`. The proof expires after ten minutes.
 
 Once signed in, the home page also displays a **tenant secret**: a value
 deterministically derived from the tenant identity and the

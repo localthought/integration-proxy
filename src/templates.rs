@@ -17,7 +17,7 @@ pub fn render_home(user: Option<&SessionUser>, tenant_secret: Option<&str>) -> S
 
 /// Renders the "connect this app" consent screen shown at `/connect` to a
 /// signed-in user, before they approve sharing their tenant secret.
-pub fn render_connect(redirect_uri: &str) -> String {
+pub fn render_connect(params: &crate::proxy::ConnectParams) -> String {
     let body = format!(
         r#"
         <div class="card">
@@ -26,11 +26,23 @@ pub fn render_connect(redirect_uri: &str) -> String {
           <p class="email">{redirect_uri}</p>
           <form method="post" action="/connect">
             <input type="hidden" name="redirect_uri" value="{redirect_uri}" />
+            <input type="hidden" name="ts" value="{ts}" />
+            <input type="hidden" name="challenge" value="{challenge}" />
+            <input type="hidden" name="tenant_id" value="{tenant_id}" />
+            <input type="hidden" name="user_id" value="{user_id}" />
+            <input type="hidden" name="user_id_sig" value="{user_id_sig}" />
+            <input type="hidden" name="response" value="{response}" />
             <button class="button" type="submit">OK</button>
           </form>
         </div>
         "#,
-        redirect_uri = escape(redirect_uri),
+        redirect_uri = escape(&params.redirect_uri),
+        ts = params.ts,
+        challenge = escape(&params.challenge),
+        tenant_id = escape(&params.tenant_id),
+        user_id = escape(&params.user_id),
+        user_id_sig = escape(&params.user_id_sig),
+        response = escape(&params.response),
     );
 
     page(&body)
@@ -206,7 +218,15 @@ mod tests {
 
     #[test]
     fn connect_shows_the_redirect_target_and_a_confirm_form() {
-        let html = render_connect("https://example.com/callback");
+        let html = render_connect(&crate::proxy::ConnectParams {
+            redirect_uri: "https://example.com/callback".into(),
+            ts: 1,
+            challenge: "c".into(),
+            tenant_id: "t".into(),
+            user_id: "u".into(),
+            user_id_sig: "s".into(),
+            response: "r".into(),
+        });
         assert!(html.contains("https://example.com/callback"));
         assert!(html.contains(r#"action="/connect""#));
         assert!(html.contains(r#"method="post""#));
@@ -214,7 +234,15 @@ mod tests {
 
     #[test]
     fn connect_escapes_the_redirect_uri() {
-        let html = render_connect("https://example.com/\"><script>alert(1)</script>");
+        let html = render_connect(&crate::proxy::ConnectParams {
+            redirect_uri: "https://example.com/\"><script>alert(1)</script>".into(),
+            ts: 1,
+            challenge: "c".into(),
+            tenant_id: "t".into(),
+            user_id: "u".into(),
+            user_id_sig: "s".into(),
+            response: "r".into(),
+        });
         assert!(!html.contains("<script>"));
         assert!(html.contains("&lt;script&gt;"));
     }
