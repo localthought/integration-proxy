@@ -24,6 +24,20 @@ pub fn connect_url(redirect_uri: &str) -> String {
     format!("/connect?{query}")
 }
 
+pub fn oauth_start_url(platform: &str, params: &ConnectParams) -> String {
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("redirect_uri", &params.redirect_uri)
+        .append_pair("ts", &params.ts.to_string())
+        .append_pair("nonce", &params.nonce)
+        .append_pair("challenge", &params.challenge)
+        .append_pair("tenant_id", &params.tenant_id)
+        .append_pair("user_id", &params.user_id)
+        .append_pair("user_id_sig", &params.user_id_sig)
+        .append_pair("response", &params.response)
+        .finish();
+    format!("/oauth/{platform}/start?{query}")
+}
+
 fn parse_redirect_uri(raw: &str) -> Result<Url, ConnectError> {
     let url = Url::parse(raw).map_err(|_| ConnectError::InvalidRedirect)?;
     if url.scheme() != "http" && url.scheme() != "https" {
@@ -74,7 +88,7 @@ pub async fn session_challenge(State(state): State<AppState>) -> Json<SessionCha
     })
 }
 
-async fn verify_connect(state: &AppState, params: &ConnectParams) -> Result<(), ConnectError> {
+pub async fn verify_connect(state: &AppState, params: &ConnectParams) -> Result<(), ConnectError> {
     if params.ts > now() || now().saturating_sub(params.ts) > 600 {
         return Err(ConnectError::InvalidSession);
     }
@@ -112,7 +126,9 @@ pub async fn connect_page(
     verify_connect(&state, &params).await?;
 
     match session::read_session(&jar) {
-        Some(_) => Ok(Html(templates::render_connect(&params)).into_response()),
+        Some(_) => {
+            Ok(Html(templates::render_connect(&params, &state.catalog.names())).into_response())
+        }
         None => {
             let jar = session::set_connect_redirect(jar, &params.redirect_uri);
             Ok((jar, Redirect::to("/auth/login")).into_response())
@@ -238,6 +254,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             key: Key::generate(),
             server_secret: config.server_secret,
+            base_url: config.base_url,
             catalog: crate::catalog::Catalog::default(),
             security: None,
         }

@@ -36,6 +36,7 @@ impl Security {
             }
         });
         database.batch_execute("CREATE TABLE IF NOT EXISTS used_challenges (nonce TEXT PRIMARY KEY, expires_at TIMESTAMPTZ NOT NULL)").await.map_err(|e| e.to_string())?;
+        database.batch_execute("CREATE TABLE IF NOT EXISTS oauth_states (state TEXT PRIMARY KEY, provider TEXT NOT NULL, redirect_uri TEXT NOT NULL, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, verifier TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL); CREATE TABLE IF NOT EXISTS connection_codes (code TEXT PRIMARY KEY, envelope TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL)").await.map_err(|e| e.to_string())?;
         Ok(Self {
             database: Arc::new(database),
             encryption_key,
@@ -99,5 +100,31 @@ impl Security {
                 },
             )
             .ok()
+    }
+
+    pub async fn store_oauth_state(
+        &self,
+        state: &str,
+        provider: &str,
+        redirect_uri: &str,
+        tenant_id: &str,
+        user_id: &str,
+        verifier: &str,
+    ) -> Result<(), String> {
+        self.database.execute("INSERT INTO oauth_states (state, provider, redirect_uri, tenant_id, user_id, verifier, expires_at) VALUES ($1,$2,$3,$4,$5,$6,NOW() + INTERVAL '10 minutes')", &[&state, &provider, &redirect_uri, &tenant_id, &user_id, &verifier]).await.map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn take_oauth_state(
+        &self,
+        state: &str,
+    ) -> Result<Option<(String, String, String, String, String)>, String> {
+        let row = self.database.query_opt("DELETE FROM oauth_states WHERE state = $1 AND expires_at > NOW() RETURNING provider, redirect_uri, tenant_id, user_id, verifier", &[&state]).await.map_err(|e| e.to_string())?;
+        Ok(row.map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4))))
+    }
+
+    pub async fn store_connection_code(&self, code: &str, envelope: &str) -> Result<(), String> {
+        self.database.execute("INSERT INTO connection_codes (code, envelope, expires_at) VALUES ($1,$2,NOW() + INTERVAL '5 minutes')", &[&code, &envelope]).await.map_err(|e| e.to_string())?;
+        Ok(())
     }
 }
