@@ -1,4 +1,4 @@
-# auth-proxy
+# integration-proxy
 
 A stateless Rust web server that lets a user log in with their Google
 account. Sign-in sets an encrypted session cookie; there is a logout button
