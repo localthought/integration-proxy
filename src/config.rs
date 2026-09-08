@@ -18,6 +18,8 @@ pub struct Config {
     /// user secret (see `user_secret`). Must stay constant across restarts
     /// and instances, or previously issued user secrets stop verifying.
     pub server_secret: String,
+    /// File listing the pinned OADs and overlays to expose under `/catalog`.
+    pub catalog_path: String,
 }
 
 impl Config {
@@ -34,6 +36,7 @@ impl Config {
         let session_secret = env::var("SESSION_SECRET").ok();
         let server_secret =
             env::var("SERVER_SECRET").map_err(|_| "SERVER_SECRET must be set".to_string())?;
+        let catalog_path = env::var("CATALOG_PATH").unwrap_or_else(|_| "catalog.yaml".to_string());
 
         Ok(Self {
             google_client_id,
@@ -42,6 +45,7 @@ impl Config {
             port,
             session_secret,
             server_secret,
+            catalog_path,
         })
     }
 

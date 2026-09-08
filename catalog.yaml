@@ -1,0 +1,16 @@
+# Each entry names the document exposed at /catalog/{platform}.yaml. Sources
+# are pinned to immutable upstream revisions so the published catalog only
+# changes when this file changes.
+platforms:
+  - name: github-issues
+    openapi: https://raw.githubusercontent.com/localthought/openapi-directory/9c5cfb87b3f8b64e11069373a73e3fc85de0de5e/APIs/github.com/github-issues/1.1.4/openapi.yaml
+    overlays:
+      - https://raw.githubusercontent.com/localthought/overlays/d603d5453e9dc5ec26a1d7a6b9cfaeec934d5f4a/github.com/github-issues/1.1.4/auth-overlay.yaml
+      - https://raw.githubusercontent.com/localthought/overlays/d603d5453e9dc5ec26a1d7a6b9cfaeec934d5f4a/github.com/github-issues/1.1.4/pagination-overlay.yaml
+      - https://raw.githubusercontent.com/localthought/overlays/d603d5453e9dc5ec26a1d7a6b9cfaeec934d5f4a/github.com/github-issues/1.1.4/crud-causality-overlay.yaml
+  - name: google-calendar
+    openapi: https://raw.githubusercontent.com/localthought/openapi-directory/9c5cfb87b3f8b64e11069373a73e3fc85de0de5e/APIs/googleapis.com/google-calendar/v3/openapi.yaml
+    overlays:
+      - https://raw.githubusercontent.com/localthought/overlays/d603d5453e9dc5ec26a1d7a6b9cfaeec934d5f4a/googleapis.com/google-calendar/v3/auth-overlay.yaml
+      - https://raw.githubusercontent.com/localthought/overlays/d603d5453e9dc5ec26a1d7a6b9cfaeec934d5f4a/googleapis.com/google-calendar/v3/pagination-overlay.yaml
+      - https://raw.githubusercontent.com/localthought/overlays/d603d5453e9dc5ec26a1d7a6b9cfaeec934d5f4a/googleapis.com/google-calendar/v3/crud-causality-overlay.yaml
