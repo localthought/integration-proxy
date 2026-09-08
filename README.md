@@ -111,6 +111,12 @@ cargo test             # test
 CI runs the same checks on every push and pull request (see
 `.github/workflows/ci.yml`).
 
+## Security
+
+The current service provides catalog and tenant-session primitives. OAuth token
+storage and the forwarding proxy remain deliberately unimplemented until the
+controls in [SECURITY.md](SECURITY.md) are in place.
+
 ## Notes on statelessness
 
 - Session data (email, name, picture, expiry) lives entirely inside the
