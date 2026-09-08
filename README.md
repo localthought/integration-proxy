@@ -90,6 +90,10 @@ OAuth credentials are provider-specific. For a catalog platform named
 letters, digits, and hyphens, and are converted to uppercase with hyphens
 replaced by underscores for environment-variable names.
 
+The server owns the OAuth endpoints and scopes. The built-in providers are
+`google-calendar` (read-only Calendar scope) and `github-issues` (`repo`
+scope); a request cannot supply a provider URL, token URL, or scope.
+
 ## Catalog
 
 `catalog.yaml` is the source of the integration catalog. Each platform names
