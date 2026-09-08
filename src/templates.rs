@@ -27,6 +27,7 @@ pub fn render_connect(params: &crate::proxy::ConnectParams) -> String {
           <form method="post" action="/connect">
             <input type="hidden" name="redirect_uri" value="{redirect_uri}" />
             <input type="hidden" name="ts" value="{ts}" />
+            <input type="hidden" name="nonce" value="{nonce}" />
             <input type="hidden" name="challenge" value="{challenge}" />
             <input type="hidden" name="tenant_id" value="{tenant_id}" />
             <input type="hidden" name="user_id" value="{user_id}" />
@@ -38,6 +39,7 @@ pub fn render_connect(params: &crate::proxy::ConnectParams) -> String {
         "#,
         redirect_uri = escape(&params.redirect_uri),
         ts = params.ts,
+        nonce = escape(&params.nonce),
         challenge = escape(&params.challenge),
         tenant_id = escape(&params.tenant_id),
         user_id = escape(&params.user_id),
@@ -221,6 +223,7 @@ mod tests {
         let html = render_connect(&crate::proxy::ConnectParams {
             redirect_uri: "https://example.com/callback".into(),
             ts: 1,
+            nonce: "n".into(),
             challenge: "c".into(),
             tenant_id: "t".into(),
             user_id: "u".into(),
@@ -237,6 +240,7 @@ mod tests {
         let html = render_connect(&crate::proxy::ConnectParams {
             redirect_uri: "https://example.com/\"><script>alert(1)</script>".into(),
             ts: 1,
+            nonce: "n".into(),
             challenge: "c".into(),
             tenant_id: "t".into(),
             user_id: "u".into(),

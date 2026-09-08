@@ -1,3 +1,5 @@
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use rand::RngCore;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
@@ -34,6 +36,7 @@ fn parse_redirect_uri(raw: &str) -> Result<Url, ConnectError> {
 pub struct ConnectParams {
     pub redirect_uri: String,
     pub ts: u64,
+    pub nonce: String,
     pub challenge: String,
     pub tenant_id: String,
     pub user_id: String,
@@ -45,6 +48,7 @@ pub struct ConnectParams {
 pub struct SessionChallenge {
     ts: u64,
     challenge: String,
+    nonce: String,
 }
 
 fn now() -> u64 {
@@ -54,25 +58,29 @@ fn now() -> u64 {
         .as_secs()
 }
 
-fn challenge(server_secret: &str, ts: u64) -> String {
-    tenant_secret::sign(server_secret, &ts.to_string())
+fn challenge(server_secret: &str, ts: u64, nonce: &str) -> String {
+    tenant_secret::sign(server_secret, &format!("{ts}.{nonce}"))
 }
 
 pub async fn session_challenge(State(state): State<AppState>) -> Json<SessionChallenge> {
     let ts = now();
+    let mut bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    let nonce = URL_SAFE_NO_PAD.encode(bytes);
     Json(SessionChallenge {
         ts,
-        challenge: challenge(&state.server_secret, ts),
+        challenge: challenge(&state.server_secret, ts, &nonce),
+        nonce,
     })
 }
 
-fn verify_connect(state: &AppState, params: &ConnectParams) -> Result<(), ConnectError> {
+async fn verify_connect(state: &AppState, params: &ConnectParams) -> Result<(), ConnectError> {
     if params.ts > now() || now().saturating_sub(params.ts) > 600 {
         return Err(ConnectError::InvalidSession);
     }
     if !tenant_secret::verify_signature(
         &state.server_secret,
-        &params.ts.to_string(),
+        &format!("{}.{}", params.ts, params.nonce),
         &params.challenge,
     ) {
         return Err(ConnectError::InvalidSession);
@@ -82,6 +90,13 @@ fn verify_connect(state: &AppState, params: &ConnectParams) -> Result<(), Connec
         || !tenant_secret::verify_signature(&tenant_secret, &params.user_id, &params.user_id_sig)
     {
         return Err(ConnectError::InvalidSession);
+    }
+    if state
+        .security
+        .as_ref()
+        .is_some_and(|security| security.is_revoked(&params.tenant_id, &params.user_id))
+    {
+        return Err(ConnectError::Revoked);
     }
     Ok(())
 }
@@ -94,7 +109,7 @@ pub async fn connect_page(
     jar: PrivateCookieJar,
 ) -> Result<Response, ConnectError> {
     parse_redirect_uri(&params.redirect_uri)?;
-    verify_connect(&state, &params)?;
+    verify_connect(&state, &params).await?;
 
     match session::read_session(&jar) {
         Some(_) => Ok(Html(templates::render_connect(&params)).into_response()),
@@ -109,6 +124,7 @@ pub async fn connect_page(
 pub struct ConnectConfirmForm {
     pub redirect_uri: String,
     pub ts: u64,
+    pub nonce: String,
     pub challenge: String,
     pub tenant_id: String,
     pub user_id: String,
@@ -126,6 +142,7 @@ pub async fn connect_confirm(
     let params = ConnectParams {
         redirect_uri: form.redirect_uri,
         ts: form.ts,
+        nonce: form.nonce,
         challenge: form.challenge,
         tenant_id: form.tenant_id,
         user_id: form.user_id,
@@ -133,7 +150,16 @@ pub async fn connect_confirm(
         response: form.response,
     };
     let mut redirect_uri = parse_redirect_uri(&params.redirect_uri)?;
-    verify_connect(&state, &params)?;
+    verify_connect(&state, &params).await?;
+    if let Some(security) = &state.security {
+        if !security
+            .consume_nonce(&params.nonce)
+            .await
+            .map_err(|_| ConnectError::InvalidSession)?
+        {
+            return Err(ConnectError::InvalidSession);
+        }
+    }
     let user = session::read_session(&jar).ok_or(ConnectError::NotLoggedIn)?;
 
     let secret = tenant_secret::derive(&state.server_secret, &user.google_sub);
@@ -167,6 +193,7 @@ pub enum ConnectError {
     InvalidRedirect,
     NotLoggedIn,
     InvalidSession,
+    Revoked,
 }
 
 impl IntoResponse for ConnectError {
@@ -181,6 +208,7 @@ impl IntoResponse for ConnectError {
                 StatusCode::UNAUTHORIZED,
                 "invalid or expired tenant session",
             ),
+            ConnectError::Revoked => (StatusCode::FORBIDDEN, "tenant or user is revoked"),
         };
         (status, message).into_response()
     }
@@ -201,6 +229,9 @@ mod tests {
             session_secret: None,
             server_secret: server_secret.to_string(),
             catalog_path: "catalog.yaml".to_string(),
+            database_url: "postgres://unused".to_string(),
+            encryption_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            revoked_subjects: vec![],
         };
         AppState {
             oauth_client: crate::auth::build_client(&config).unwrap(),
@@ -208,6 +239,7 @@ mod tests {
             key: Key::generate(),
             server_secret: config.server_secret,
             catalog: crate::catalog::Catalog::default(),
+            security: None,
         }
     }
 
@@ -224,13 +256,15 @@ mod tests {
 
     fn connect_params(state: &AppState, redirect_uri: &str) -> ConnectParams {
         let ts = now();
-        let challenge = challenge(&state.server_secret, ts);
+        let nonce = "test-nonce".to_string();
+        let challenge = challenge(&state.server_secret, ts, &nonce);
         let tenant_id = "tenant-123".to_string();
         let user_id = "user-123".to_string();
         let secret = tenant_secret::derive(&state.server_secret, &tenant_id);
         ConnectParams {
             redirect_uri: redirect_uri.to_string(),
             ts,
+            nonce,
             challenge: challenge.clone(),
             tenant_id,
             user_id: user_id.clone(),
@@ -304,6 +338,7 @@ mod tests {
             Form(ConnectConfirmForm {
                 redirect_uri: "https://example.com/cb".to_string(),
                 ts: 0,
+                nonce: "x".into(),
                 challenge: "x".into(),
                 tenant_id: "x".into(),
                 user_id: "x".into(),
@@ -329,7 +364,8 @@ mod tests {
             Form(ConnectConfirmForm {
                 redirect_uri: "https://example.com/cb?existing=1".to_string(),
                 ts: now(),
-                challenge: challenge("server-secret", now()),
+                nonce: "test-nonce".into(),
+                challenge: challenge("server-secret", now(), "test-nonce"),
                 tenant_id: "tenant".into(),
                 user_id: "user".into(),
                 user_id_sig: tenant_secret::sign(
@@ -338,7 +374,7 @@ mod tests {
                 ),
                 response: tenant_secret::sign(
                     &tenant_secret::derive("server-secret", "tenant"),
-                    &challenge("server-secret", now()),
+                    &challenge("server-secret", now(), "test-nonce"),
                 ),
             }),
         )

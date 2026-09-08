@@ -10,10 +10,10 @@ the following controls are part of the design.
 tenant-vouched user id. This proves possession of the tenant secret, but it is
 a bearer credential: anyone who obtains it can mint proofs for any user id.
 Use a high-entropy `SERVER_SECRET`, give every tenant a distinct identity, and
-rotate the server secret only with a migration plan. The ten-minute challenge
-limits replay but does not prevent replay inside that window without shared
-state. A one-time challenge store, or a tenant-signed request with a unique
-nonce and replay store, is required where replay protection matters.
+rotate the server secret only with a migration plan. Challenges now contain a
+random nonce and are consumed atomically in PostgreSQL when `/connect` is
+confirmed; a second use is rejected. Expired nonce records are cleaned during
+subsequent consumption.
 
 ## OAuth (#9)
 
@@ -48,7 +48,7 @@ generic authentication errors.
 
 ## Release gate
 
-Before implementing #9 or #10, add provider-specific client configuration,
-redirect URI allowlists, key management, a token-revocation policy, replay
-protection, SSRF tests, OpenAPI validation tests, and an external security
-review of the token envelope format.
+Provider callback URLs and credential variable names are now deterministic
+from catalog platform names. The remaining gate for #9 and #10 is provider
+registration, OAD request validation, SSRF tests, and an external review of
+the token envelope format before live credentials are handled.
