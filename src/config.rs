@@ -14,9 +14,9 @@ pub struct Config {
     /// random key is generated at startup: sessions stay valid for the life
     /// of the process but are invalidated on restart.
     pub session_secret: Option<String>,
-    /// Secret used to deterministically derive each user's per-identity
-    /// user secret (see `user_secret`). Must stay constant across restarts
-    /// and instances, or previously issued user secrets stop verifying.
+    /// Secret used to deterministically derive each tenant's secret (see
+    /// `tenant_secret`). Must stay constant across restarts and instances,
+    /// or previously issued tenant secrets stop verifying.
     pub server_secret: String,
     /// File listing the pinned OADs and overlays to expose under `/catalog`.
     pub catalog_path: String,

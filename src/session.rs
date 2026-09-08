@@ -13,7 +13,7 @@ const SESSION_LIFETIME_SECS: u64 = 60 * 60 * 24 * 7; // 7 days
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionUser {
     /// Google's stable, unique identifier for the account (the OIDC `sub`
-    /// claim). Used as the identity for the per-user secret, since unlike
+    /// claim). Used as the identity for the tenant secret, since unlike
     /// email it never changes or gets reused.
     pub google_sub: String,
     pub email: String,

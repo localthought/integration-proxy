@@ -3,11 +3,11 @@ use crate::session::SessionUser;
 /// Minimal, dependency-free HTML rendering. The GUI is intentionally tiny:
 /// a login button when signed out, and the user's identity plus a logout
 /// button when signed in.
-pub fn render_home(user: Option<&SessionUser>, user_secret: Option<&str>) -> String {
+pub fn render_home(user: Option<&SessionUser>, tenant_secret: Option<&str>) -> String {
     let body = match user {
         Some(user) => signed_in_body(
             user,
-            user_secret.expect("user_secret is set when signed in"),
+            tenant_secret.expect("tenant_secret is set when signed in"),
         ),
         None => signed_out_body(),
     };
@@ -16,7 +16,7 @@ pub fn render_home(user: Option<&SessionUser>, user_secret: Option<&str>) -> Str
 }
 
 /// Renders the "connect this app" consent screen shown at `/connect` to a
-/// signed-in user, before they approve sharing their user secret.
+/// signed-in user, before they approve sharing their tenant secret.
 pub fn render_connect(redirect_uri: &str) -> String {
     let body = format!(
         r#"
@@ -47,7 +47,7 @@ fn signed_out_body() -> String {
     .to_string()
 }
 
-fn signed_in_body(user: &SessionUser, user_secret: &str) -> String {
+fn signed_in_body(user: &SessionUser, tenant_secret: &str) -> String {
     let avatar = user
         .picture
         .as_deref()
@@ -60,12 +60,11 @@ fn signed_in_body(user: &SessionUser, user_secret: &str) -> String {
           {avatar}
           <h1>Welcome, {name}</h1>
           <p class="email">{email}</p>
-          <p class="secret-label">Your user secret:</p>
-          <code class="secret">{user_secret}</code>
+          <p class="secret-label">Your tenant secret:</p>
+          <code class="secret">{tenant_secret}</code>
           <p class="secret-help">
-            Set this as <code>USER_SECRET</code> in the environment of your
-            atomic-server (running the <code>feat/api-plugins</code> branch)
-            to authenticate requests on your behalf.
+            This secret identifies your tenant to services that integrate with
+            this proxy.
           </p>
           <form method="post" action="/auth/logout">
             <button class="button button-secondary" type="submit">Log out</button>
@@ -75,7 +74,7 @@ fn signed_in_body(user: &SessionUser, user_secret: &str) -> String {
         avatar = avatar,
         name = escape(&user.name),
         email = escape(&user.email),
-        user_secret = escape(user_secret),
+        tenant_secret = escape(tenant_secret),
     )
 }
 
@@ -184,10 +183,10 @@ mod tests {
     }
 
     #[test]
-    fn signed_in_shows_user_secret() {
+    fn signed_in_shows_tenant_secret() {
         let html = render_home(Some(&test_user()), Some("the-secret"));
         assert!(html.contains("the-secret"));
-        assert!(html.contains("USER_SECRET"));
+        assert!(html.contains("tenant secret"));
     }
 
     #[test]
