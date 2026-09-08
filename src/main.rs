@@ -1,6 +1,7 @@
 mod auth;
 mod catalog;
 mod config;
+mod oauth;
 #[allow(dead_code)] // used by the provider OAuth routes introduced with issue #9
 mod providers;
 mod proxy;
@@ -29,6 +30,7 @@ struct AppState {
     http_client: reqwest::Client,
     key: Key,
     server_secret: String,
+    base_url: String,
     catalog: catalog::Catalog,
     security: Option<security::Security>,
 }
@@ -89,11 +91,13 @@ async fn main() {
 
     let port = config.port;
     let server_secret = config.server_secret.clone();
+    let base_url = config.base_url.clone();
     let state = AppState {
         oauth_client,
         http_client: reqwest::Client::new(),
         key,
         server_secret,
+        base_url,
         catalog,
         security: Some(security),
     };
@@ -109,6 +113,8 @@ async fn main() {
         )
         .route("/proxy", axum::routing::any(proxy::proxy))
         .route("/session", get(proxy::session_challenge))
+        .route("/oauth/{provider}/start", get(oauth::start))
+        .route("/oauth/{provider}/callback", get(oauth::callback))
         .route("/catalog", get(catalog::list))
         .route("/catalog/{file}", get(catalog::document))
         .layer(TraceLayer::new_for_http())

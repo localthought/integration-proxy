@@ -70,7 +70,7 @@ impl Catalog {
         Ok(Self { documents })
     }
 
-    fn names(&self) -> Vec<String> {
+    pub fn names(&self) -> Vec<String> {
         self.documents.keys().cloned().collect()
     }
     fn get(&self, platform: &str) -> Option<&str> {
