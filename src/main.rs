@@ -90,6 +90,7 @@ async fn main() {
             get(proxy::connect_page).post(proxy::connect_confirm),
         )
         .route("/proxy", axum::routing::any(proxy::proxy))
+        .route("/session", get(proxy::session_challenge))
         .route("/catalog", get(catalog::list))
         .route("/catalog/{file}", get(catalog::document))
         .layer(TraceLayer::new_for_http())

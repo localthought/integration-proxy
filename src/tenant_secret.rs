@@ -38,6 +38,19 @@ pub fn verify(server_secret: &str, secret: &str) -> Option<String> {
     }
 }
 
+/// Signs an arbitrary protocol value with a tenant secret. The result is URL
+/// safe, so it can be carried in a query parameter.
+pub fn sign(secret: &str, value: &str) -> String {
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts a key of any length");
+    mac.update(value.as_bytes());
+    URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+}
+
+pub fn verify_signature(secret: &str, value: &str, signature: &str) -> bool {
+    constant_time_eq(sign(secret, value).as_bytes(), signature.as_bytes())
+}
+
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;

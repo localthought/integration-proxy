@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use axum::{
     extract::{Form, Query, State},
     http::{header, HeaderMap, StatusCode},
@@ -5,7 +7,7 @@ use axum::{
     Json,
 };
 use axum_extra::extract::PrivateCookieJar;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use url::Url;
 
@@ -31,18 +33,71 @@ fn parse_redirect_uri(raw: &str) -> Result<Url, ConnectError> {
 #[derive(Deserialize)]
 pub struct ConnectParams {
     pub redirect_uri: String,
+    pub ts: u64,
+    pub challenge: String,
+    pub tenant_id: String,
+    pub user_id: String,
+    pub user_id_sig: String,
+    pub response: String,
+}
+
+#[derive(Serialize)]
+pub struct SessionChallenge {
+    ts: u64,
+    challenge: String,
+}
+
+fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock before epoch")
+        .as_secs()
+}
+
+fn challenge(server_secret: &str, ts: u64) -> String {
+    tenant_secret::sign(server_secret, &ts.to_string())
+}
+
+pub async fn session_challenge(State(state): State<AppState>) -> Json<SessionChallenge> {
+    let ts = now();
+    Json(SessionChallenge {
+        ts,
+        challenge: challenge(&state.server_secret, ts),
+    })
+}
+
+fn verify_connect(state: &AppState, params: &ConnectParams) -> Result<(), ConnectError> {
+    if params.ts > now() || now().saturating_sub(params.ts) > 600 {
+        return Err(ConnectError::InvalidSession);
+    }
+    if !tenant_secret::verify_signature(
+        &state.server_secret,
+        &params.ts.to_string(),
+        &params.challenge,
+    ) {
+        return Err(ConnectError::InvalidSession);
+    }
+    let tenant_secret = tenant_secret::derive(&state.server_secret, &params.tenant_id);
+    if !tenant_secret::verify_signature(&tenant_secret, &params.challenge, &params.response)
+        || !tenant_secret::verify_signature(&tenant_secret, &params.user_id, &params.user_id_sig)
+    {
+        return Err(ConnectError::InvalidSession);
+    }
+    Ok(())
 }
 
 /// Shows the "connect this app" consent screen for a signed-in user, or
 /// sends them to log in first (remembering where to come back to).
 pub async fn connect_page(
+    State(state): State<AppState>,
     Query(params): Query<ConnectParams>,
     jar: PrivateCookieJar,
 ) -> Result<Response, ConnectError> {
     parse_redirect_uri(&params.redirect_uri)?;
+    verify_connect(&state, &params)?;
 
     match session::read_session(&jar) {
-        Some(_) => Ok(Html(templates::render_connect(&params.redirect_uri)).into_response()),
+        Some(_) => Ok(Html(templates::render_connect(&params)).into_response()),
         None => {
             let jar = session::set_connect_redirect(jar, &params.redirect_uri);
             Ok((jar, Redirect::to("/auth/login")).into_response())
@@ -53,6 +108,12 @@ pub async fn connect_page(
 #[derive(Deserialize)]
 pub struct ConnectConfirmForm {
     pub redirect_uri: String,
+    pub ts: u64,
+    pub challenge: String,
+    pub tenant_id: String,
+    pub user_id: String,
+    pub user_id_sig: String,
+    pub response: String,
 }
 
 /// Confirms the connection and redirects back to the caller with the
@@ -62,7 +123,17 @@ pub async fn connect_confirm(
     jar: PrivateCookieJar,
     Form(form): Form<ConnectConfirmForm>,
 ) -> Result<Redirect, ConnectError> {
-    let mut redirect_uri = parse_redirect_uri(&form.redirect_uri)?;
+    let params = ConnectParams {
+        redirect_uri: form.redirect_uri,
+        ts: form.ts,
+        challenge: form.challenge,
+        tenant_id: form.tenant_id,
+        user_id: form.user_id,
+        user_id_sig: form.user_id_sig,
+        response: form.response,
+    };
+    let mut redirect_uri = parse_redirect_uri(&params.redirect_uri)?;
+    verify_connect(&state, &params)?;
     let user = session::read_session(&jar).ok_or(ConnectError::NotLoggedIn)?;
 
     let secret = tenant_secret::derive(&state.server_secret, &user.google_sub);
@@ -95,6 +166,7 @@ pub async fn proxy(State(state): State<AppState>, headers: HeaderMap) -> Respons
 pub enum ConnectError {
     InvalidRedirect,
     NotLoggedIn,
+    InvalidSession,
 }
 
 impl IntoResponse for ConnectError {
@@ -105,6 +177,10 @@ impl IntoResponse for ConnectError {
                 "redirect_uri is missing or invalid",
             ),
             ConnectError::NotLoggedIn => (StatusCode::UNAUTHORIZED, "please log in first"),
+            ConnectError::InvalidSession => (
+                StatusCode::UNAUTHORIZED,
+                "invalid or expired tenant session",
+            ),
         };
         (status, message).into_response()
     }
@@ -146,6 +222,23 @@ mod tests {
         (jar, user)
     }
 
+    fn connect_params(state: &AppState, redirect_uri: &str) -> ConnectParams {
+        let ts = now();
+        let challenge = challenge(&state.server_secret, ts);
+        let tenant_id = "tenant-123".to_string();
+        let user_id = "user-123".to_string();
+        let secret = tenant_secret::derive(&state.server_secret, &tenant_id);
+        ConnectParams {
+            redirect_uri: redirect_uri.to_string(),
+            ts,
+            challenge: challenge.clone(),
+            tenant_id,
+            user_id: user_id.clone(),
+            user_id_sig: tenant_secret::sign(&secret, &user_id),
+            response: tenant_secret::sign(&secret, &challenge),
+        }
+    }
+
     #[test]
     fn connect_url_encodes_the_redirect_uri() {
         let url = connect_url("https://example.com/cb?x=1&y=2");
@@ -157,11 +250,11 @@ mod tests {
 
     #[tokio::test]
     async fn connect_page_rejects_invalid_redirect_uri() {
+        let state = test_state("server-secret");
         let jar = PrivateCookieJar::new(Key::generate());
         let err = connect_page(
-            Query(ConnectParams {
-                redirect_uri: "not a url".to_string(),
-            }),
+            State(state),
+            Query(connect_params(&test_state("server-secret"), "not a url")),
             jar,
         )
         .await
@@ -171,11 +264,11 @@ mod tests {
 
     #[tokio::test]
     async fn connect_page_sends_signed_out_visitor_to_login() {
+        let state = test_state("server-secret");
         let jar = PrivateCookieJar::new(Key::generate());
         let response = connect_page(
-            Query(ConnectParams {
-                redirect_uri: "https://example.com/cb".to_string(),
-            }),
+            State(state.clone()),
+            Query(connect_params(&state, "https://example.com/cb")),
             jar,
         )
         .await
@@ -189,11 +282,11 @@ mod tests {
 
     #[tokio::test]
     async fn connect_page_shows_consent_screen_when_signed_in() {
+        let state = test_state("server-secret");
         let (jar, _) = logged_in_jar(Key::generate());
         let response = connect_page(
-            Query(ConnectParams {
-                redirect_uri: "https://example.com/cb".to_string(),
-            }),
+            State(state.clone()),
+            Query(connect_params(&state, "https://example.com/cb")),
             jar,
         )
         .await
@@ -202,7 +295,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn connect_confirm_requires_login() {
+    async fn connect_confirm_rejects_an_invalid_tenant_session() {
         let jar = PrivateCookieJar::new(Key::generate());
         let state = test_state("server-secret");
         let err = connect_confirm(
@@ -210,11 +303,17 @@ mod tests {
             jar,
             Form(ConnectConfirmForm {
                 redirect_uri: "https://example.com/cb".to_string(),
+                ts: 0,
+                challenge: "x".into(),
+                tenant_id: "x".into(),
+                user_id: "x".into(),
+                user_id_sig: "x".into(),
+                response: "x".into(),
             }),
         )
         .await
         .unwrap_err();
-        assert!(matches!(err, ConnectError::NotLoggedIn));
+        assert!(matches!(err, ConnectError::InvalidSession));
     }
 
     #[tokio::test]
@@ -229,6 +328,18 @@ mod tests {
             jar,
             Form(ConnectConfirmForm {
                 redirect_uri: "https://example.com/cb?existing=1".to_string(),
+                ts: now(),
+                challenge: challenge("server-secret", now()),
+                tenant_id: "tenant".into(),
+                user_id: "user".into(),
+                user_id_sig: tenant_secret::sign(
+                    &tenant_secret::derive("server-secret", "tenant"),
+                    "user",
+                ),
+                response: tenant_secret::sign(
+                    &tenant_secret::derive("server-secret", "tenant"),
+                    &challenge("server-secret", now()),
+                ),
             }),
         )
         .await
