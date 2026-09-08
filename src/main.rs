@@ -1,5 +1,6 @@
 mod auth;
 mod config;
+mod proxy;
 mod session;
 mod templates;
 mod user_secret;
@@ -72,6 +73,11 @@ async fn main() {
         .route("/auth/login", get(auth::login))
         .route("/auth/callback", get(auth::callback))
         .route("/auth/logout", post(auth::logout))
+        .route(
+            "/connect",
+            get(proxy::connect_page).post(proxy::connect_confirm),
+        )
+        .route("/proxy", axum::routing::any(proxy::proxy))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
