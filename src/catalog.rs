@@ -231,7 +231,7 @@ mod tests {
                 oauth2::AuthUrl::new("https://example.com/auth".into()).unwrap(),
                 None,
             ),
-            http_client: reqwest::Client::new(),
+            http_client: crate::build_http_client(),
             key: axum_extra::extract::cookie::Key::generate(),
             server_secret: "test".into(),
             base_url: "http://localhost".into(),
