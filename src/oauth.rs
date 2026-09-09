@@ -45,7 +45,7 @@ struct Credential {
     user_id: String,
     access_token: String,
     refresh_token: Option<String>,
-    expires_in: Option<u64>,
+    expires_at: Option<u64>,
 }
 
 fn random() -> String {
@@ -181,7 +181,9 @@ pub async fn callback(
         user_id: user_id.clone(),
         access_token: token.access_token,
         refresh_token: token.refresh_token,
-        expires_in: token.expires_in,
+        expires_at: token
+            .expires_in
+            .map(|seconds| crate::proxy::now_unix() + seconds),
     };
     let aad = "connection-credential-v1";
     let Ok(envelope) = security.seal(&serde_json::to_vec(&credential).unwrap(), aad.as_bytes())

@@ -72,6 +72,9 @@ fn now() -> u64 {
         .expect("clock before epoch")
         .as_secs()
 }
+pub fn now_unix() -> u64 {
+    now()
+}
 
 fn challenge(server_secret: &str, ts: u64, nonce: &str) -> String {
     tenant_secret::sign(server_secret, &format!("{ts}.{nonce}"))
@@ -205,16 +208,56 @@ pub async fn proxy(State(state): State<AppState>, headers: HeaderMap) -> Respons
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct Credential {
     provider: String,
     tenant_id: String,
     user_id: String,
     access_token: String,
-    #[serde(rename = "refresh_token")]
-    _refresh_token: Option<String>,
-    #[serde(rename = "expires_in")]
-    _expires_in: Option<u64>,
+    refresh_token: Option<String>,
+    expires_at: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct RefreshToken {
+    access_token: String,
+    #[serde(default)]
+    refresh_token: Option<String>,
+    #[serde(default)]
+    expires_in: Option<u64>,
+}
+
+async fn refresh_if_needed(state: &AppState, credential: &mut Credential) -> Result<(), ()> {
+    if credential
+        .expires_at
+        .is_none_or(|expires| expires > now() + 30)
+    {
+        return Ok(());
+    }
+    let refresh_token = credential.refresh_token.as_deref().ok_or(())?;
+    let provider = crate::providers::Provider::configured(&credential.provider).map_err(|_| ())?;
+    let response = state
+        .http_client
+        .post(provider.provider.token_url)
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+            ("client_id", &provider.client_id),
+            ("client_secret", &provider.client_secret),
+        ])
+        .header("accept", "application/json")
+        .send()
+        .await
+        .map_err(|_| ())?
+        .error_for_status()
+        .map_err(|_| ())?;
+    let token = response.json::<RefreshToken>().await.map_err(|_| ())?;
+    credential.access_token = token.access_token;
+    if token.refresh_token.is_some() {
+        credential.refresh_token = token.refresh_token;
+    }
+    credential.expires_at = token.expires_in.map(|seconds| now() + seconds);
+    Ok(())
 }
 
 pub async fn forward(
@@ -251,13 +294,16 @@ pub async fn forward(
     let Some(plaintext) = security.open(&envelope, b"connection-credential-v1") else {
         return (StatusCode::UNAUTHORIZED, "invalid connection code").into_response();
     };
-    let Ok(credential) = serde_json::from_slice::<Credential>(&plaintext) else {
+    let Ok(mut credential) = serde_json::from_slice::<Credential>(&plaintext) else {
         return (StatusCode::UNAUTHORIZED, "invalid connection code").into_response();
     };
     if credential.provider != platform
         || security.is_revoked(&credential.tenant_id, &credential.user_id)
     {
         return (StatusCode::FORBIDDEN, "credential is not permitted").into_response();
+    }
+    if refresh_if_needed(&state, &mut credential).await.is_err() {
+        return (StatusCode::UNAUTHORIZED, "credential refresh failed").into_response();
     }
     let request_path = format!("/{path}");
     let Some(mut target) = state
@@ -274,7 +320,7 @@ pub async fn forward(
     let mut request = state
         .http_client
         .request(method, target)
-        .bearer_auth(credential.access_token);
+        .bearer_auth(&credential.access_token);
     if let Some(content_type) = headers.get(header::CONTENT_TYPE) {
         request = request.header(header::CONTENT_TYPE, content_type);
     }
@@ -301,6 +347,34 @@ pub async fn forward(
             .headers_mut()
             .insert(header::CONTENT_TYPE, content_type);
     }
+    let Ok(envelope) = security.seal(
+        &serde_json::to_vec(&credential).unwrap(),
+        b"connection-credential-v1",
+    ) else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "credential rotation failed",
+        )
+            .into_response();
+    };
+    let mut new_code = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut new_code);
+    let new_code = URL_SAFE_NO_PAD.encode(new_code);
+    if security
+        .store_connection_code(&new_code, &envelope)
+        .await
+        .is_err()
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "credential rotation failed",
+        )
+            .into_response();
+    }
+    response.headers_mut().insert(
+        "x-connection-code",
+        axum::http::HeaderValue::from_str(&new_code).unwrap(),
+    );
     response
 }
 
