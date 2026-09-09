@@ -15,8 +15,8 @@ platforms:
       - https://raw.githubusercontent.com/localthought/overlays/d603d5453e9dc5ec26a1d7a6b9cfaeec934d5f4a/googleapis.com/google-calendar/v3/pagination-overlay.yaml
       - https://raw.githubusercontent.com/localthought/overlays/d603d5453e9dc5ec26a1d7a6b9cfaeec934d5f4a/googleapis.com/google-calendar/v3/crud-causality-overlay.yaml
   - name: moneybird
-    openapi: https://raw.githubusercontent.com/localthought/openapi-directory/66d399ff3ef3f4a3f3523109495b3bbea4e34aba/APIs/moneybird.com/v2-readonly/openapi.yaml
+    openapi: https://raw.githubusercontent.com/localthought/openapi-directory/c4a7e561444feee190dfc6a222d78b17c26bbf01/APIs/moneybird.com/v2-readonly/openapi.yaml
     overlays:
-      - https://raw.githubusercontent.com/localthought/overlays/5639cb62f9086324688b7c11d29fd13f631d6ca3/moneybird.com/api/v2/auth-overlay.yaml
-      - https://raw.githubusercontent.com/localthought/overlays/5639cb62f9086324688b7c11d29fd13f631d6ca3/moneybird.com/api/v2/pagination-overlay.yaml
-      - https://raw.githubusercontent.com/localthought/overlays/5639cb62f9086324688b7c11d29fd13f631d6ca3/moneybird.com/api/v2/crud-causality-overlay.yaml
+      - https://raw.githubusercontent.com/localthought/overlays/e00543f9031e5b0dea0f4b130787a7289f1602fb/moneybird.com/api/v2/auth-overlay.yaml
+      - https://raw.githubusercontent.com/localthought/overlays/e00543f9031e5b0dea0f4b130787a7289f1602fb/moneybird.com/api/v2/pagination-overlay.yaml
+      - https://raw.githubusercontent.com/localthought/overlays/e00543f9031e5b0dea0f4b130787a7289f1602fb/moneybird.com/api/v2/crud-causality-overlay.yaml

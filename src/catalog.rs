@@ -269,6 +269,14 @@ mod tests {
         assert!(document
             .pointer("/components/crudResources/contact/collections/contacts")
             .is_some());
+        let schema_ref = document
+            .pointer("/components/crudResources/contact/schema/$ref")
+            .and_then(Value::as_str)
+            .expect("contacts must declare their schema");
+        let schema = document
+            .pointer(schema_ref.strip_prefix('#').unwrap())
+            .expect("contacts schema reference must resolve");
+        assert!(schema.pointer("/properties/company_name").is_some());
         let upstream = catalog
             .allows("moneybird", "GET", "/api/v2/123/contacts.json")
             .expect("Moneybird contacts path must include the server base path");
