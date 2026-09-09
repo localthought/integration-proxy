@@ -81,8 +81,17 @@ impl Catalog {
             .first()?
             .get("url")?
             .as_str()?;
+        let server_url = url::Url::parse(server).ok()?;
+        // OpenAPI paths are relative to the server URL, which can include an API prefix.
+        let base_path = server_url.path().trim_end_matches('/');
+        let relative_path = path.strip_prefix(base_path)?;
+        if !relative_path.starts_with('/') {
+            return None;
+        }
         let paths = document.get("paths")?.as_object()?;
-        let template = paths.keys().find(|template| path_matches(template, path))?;
+        let template = paths
+            .keys()
+            .find(|template| path_matches(template, relative_path))?;
         if !paths
             .get(template)?
             .get(method.to_ascii_lowercase())?
@@ -90,7 +99,7 @@ impl Catalog {
         {
             return None;
         }
-        url::Url::parse(server).ok()
+        Some(server_url)
     }
     fn get(&self, platform: &str) -> Option<&str> {
         self.documents.get(platform).map(String::as_str)
@@ -206,6 +215,47 @@ pub async fn document(Path(file): Path<String>, State(state): State<AppState>) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn validates_google_endpoints_relative_to_server_base_path() {
+        for server in [
+            "https://www.googleapis.com/calendar/v3",
+            "https://www.googleapis.com/calendar/v3/",
+        ] {
+            let catalog = Catalog { documents: BTreeMap::from([("google-calendar".into(), format!("servers:\n  - url: {server}\npaths:\n  /users/me/calendarList:\n    get: {{}}\n  /calendars/{{calendarId}}/events:\n    get: {{}}\n"))]) };
+            assert!(catalog
+                .allows(
+                    "google-calendar",
+                    "GET",
+                    "/calendar/v3/users/me/calendarList"
+                )
+                .is_some());
+            assert!(catalog
+                .allows(
+                    "google-calendar",
+                    "GET",
+                    "/calendar/v3/calendars/a%40example.com/events"
+                )
+                .is_some());
+            assert!(catalog
+                .allows("google-calendar", "GET", "/users/me/calendarList")
+                .is_none());
+            assert!(catalog
+                .allows(
+                    "google-calendar",
+                    "GET",
+                    "/calendar/v30/users/me/calendarList"
+                )
+                .is_none());
+            assert!(catalog
+                .allows(
+                    "google-calendar",
+                    "POST",
+                    "/calendar/v3/users/me/calendarList"
+                )
+                .is_none());
+        }
+    }
+
     use axum::{
         body::{to_bytes, Body},
         http::Request,
