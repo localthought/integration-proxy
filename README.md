@@ -94,6 +94,12 @@ The server owns the OAuth endpoints and scopes. The built-in providers are
 `google-calendar` (read-only Calendar scope) and `github-issues` (`repo`
 scope); a request cannot supply a provider URL, token URL, or scope.
 
+Use the `connection_code` returned by the OAuth redirect as the Bearer token
+for `/proxy/{platform}/{path}`. Each successful proxy response includes a new
+single-use value in `X-Connection-Code`; use that value for the next request.
+The proxy refreshes an expired provider access token when a refresh token is
+available, and rotates the handoff code after every request.
+
 ## Catalog
 
 `catalog.yaml` is the source of the integration catalog. Each platform names
