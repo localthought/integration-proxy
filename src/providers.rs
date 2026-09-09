@@ -39,7 +39,10 @@ pub fn known(name: &str) -> Option<Provider> {
             name: "google-calendar",
             authorization_url: "https://accounts.google.com/o/oauth2/v2/auth",
             token_url: "https://oauth2.googleapis.com/token",
-            scopes: &["https://www.googleapis.com/auth/calendar.readonly"],
+            scopes: &[
+                "https://www.googleapis.com/auth/calendar.events",
+                "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+            ],
         }),
         "github-issues" => Some(Provider {
             name: "github-issues",
@@ -63,7 +66,10 @@ mod tests {
         );
         assert_eq!(
             google.scopes,
-            ["https://www.googleapis.com/auth/calendar.readonly"]
+            [
+                "https://www.googleapis.com/auth/calendar.events",
+                "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
+            ]
         );
         assert!(known("https://attacker.example").is_none());
     }

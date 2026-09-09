@@ -136,7 +136,11 @@ fn browser_cors() -> tower_http::cors::CorsLayer {
             Method::DELETE,
             Method::OPTIONS,
         ])
-        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            header::IF_MATCH,
+        ])
         .expose_headers([
             HeaderName::from_static("x-connection-code"),
             header::LINK,
