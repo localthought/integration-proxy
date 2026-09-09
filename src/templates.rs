@@ -4,6 +4,9 @@ use crate::session::SessionUser;
 /// a login button when signed out, and the user's identity plus a logout
 /// button when signed in.
 pub fn render_home(user: Option<&SessionUser>, tenant_secret: Option<&str>) -> String {
+    if user.is_none() {
+        return include_str!("../static/index.html").to_string();
+    }
     let body = match user {
         Some(user) => signed_in_body(
             user,
@@ -111,7 +114,8 @@ fn page(body: &str) -> String {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>auth-proxy</title>
+  <title>LocalThought · Integrations</title>
+  <link rel="icon" type="image/png" href="/logo.png" />
   <style>
     :root {{ color-scheme: light dark; }}
     body {{
@@ -173,7 +177,10 @@ fn page(body: &str) -> String {
   </style>
 </head>
 <body>
-  {body}
+  <main>
+    <a href="/" aria-label="LocalThought home" style="display:block;text-align:center;margin-bottom:1rem"><img src="/logo.png" alt="LocalThought" width="80" height="80" style="border-radius:8px" /></a>
+    {body}
+  </main>
 </body>
 </html>"#,
         body = body

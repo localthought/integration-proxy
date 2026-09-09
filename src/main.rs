@@ -150,6 +150,7 @@ fn browser_cors() -> tower_http::cors::CorsLayer {
 fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(home))
+        .route("/logo.png", get(logo))
         .route("/auth/login", get(auth::login))
         .route("/auth/callback", get(auth::callback))
         .route("/auth/logout", post(auth::logout))
@@ -167,6 +168,16 @@ fn router(state: AppState) -> Router {
         .layer(browser_cors())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+async fn logo() -> impl axum::response::IntoResponse {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "image/png"),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=3600"),
+        ],
+        include_bytes!("../static/logo.png").as_slice(),
+    )
 }
 
 async fn home(State(state): State<AppState>, jar: PrivateCookieJar) -> Html<String> {
