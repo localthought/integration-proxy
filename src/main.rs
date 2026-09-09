@@ -102,7 +102,19 @@ async fn main() {
         security: Some(security),
     };
 
-    let app = Router::new()
+    let app = router(state);
+
+    let addr = format!("0.0.0.0:{port}");
+    tracing::info!("auth-proxy listening on http://{addr}");
+
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
+    axum::serve(listener, app).await.expect("server error");
+}
+
+fn router(state: AppState) -> Router {
+    Router::new()
         .route("/", get(home))
         .route("/auth/login", get(auth::login))
         .route("/auth/callback", get(auth::callback))
@@ -114,20 +126,12 @@ async fn main() {
         .route("/proxy", axum::routing::any(proxy::proxy))
         .route("/proxy/*path", axum::routing::any(proxy::forward))
         .route("/session", get(proxy::session_challenge))
-        .route("/oauth/{provider}/start", get(oauth::start))
-        .route("/oauth/{provider}/callback", get(oauth::callback))
+        .route("/oauth/:provider/start", get(oauth::start))
+        .route("/oauth/:provider/callback", get(oauth::callback))
         .route("/catalog", get(catalog::list))
-        .route("/catalog/{file}", get(catalog::document))
+        .route("/catalog/:file", get(catalog::document))
         .layer(TraceLayer::new_for_http())
-        .with_state(state);
-
-    let addr = format!("0.0.0.0:{port}");
-    tracing::info!("auth-proxy listening on http://{addr}");
-
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
-    axum::serve(listener, app).await.expect("server error");
+        .with_state(state)
 }
 
 async fn home(State(state): State<AppState>, jar: PrivateCookieJar) -> Html<String> {
