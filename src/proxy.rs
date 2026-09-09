@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
     body::Bytes,
-    extract::{Form, Path, Query, State},
+    extract::{Form, Path, Query, RawQuery, State},
     http::{header, HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
     Json,
@@ -262,6 +262,7 @@ async fn refresh_if_needed(state: &AppState, credential: &mut Credential) -> Res
 
 pub async fn forward(
     Path(path): Path<String>,
+    RawQuery(query): RawQuery,
     State(state): State<AppState>,
     method: axum::http::Method,
     headers: HeaderMap,
@@ -328,6 +329,7 @@ pub async fn forward(
         &state.http_client,
         method,
         target,
+        query.as_deref(),
         &credential.access_token,
         &headers,
         body,
@@ -339,7 +341,7 @@ pub async fn forward(
         Err(_) => return (StatusCode::BAD_GATEWAY, "upstream request failed").into_response(),
     };
     let status = upstream.status();
-    let content_type = upstream.headers().get(header::CONTENT_TYPE).cloned();
+    let forwarded_headers = upstream_response_headers(upstream.headers());
     let bytes = match upstream.bytes().await {
         Ok(bytes) if bytes.len() <= 10_485_760 => bytes,
         _ => {
@@ -352,11 +354,7 @@ pub async fn forward(
     };
     let mut response = Response::new(bytes.into());
     *response.status_mut() = status;
-    if let Some(content_type) = content_type {
-        response
-            .headers_mut()
-            .insert(header::CONTENT_TYPE, content_type);
-    }
+    *response.headers_mut() = forwarded_headers;
     let Ok(envelope) = security.seal(
         &serde_json::to_vec(&credential).unwrap(),
         b"connection-credential-v1",
@@ -388,14 +386,27 @@ pub async fn forward(
     response
 }
 
+// Forward only representation/pagination metadata, never provider cookies or credentials.
+fn upstream_response_headers(headers: &HeaderMap) -> HeaderMap {
+    let mut result = HeaderMap::new();
+    for name in [header::CONTENT_TYPE, header::LINK] {
+        for value in headers.get_all(&name) {
+            result.append(name.clone(), value.clone());
+        }
+    }
+    result
+}
+
 fn upstream_request(
     client: &reqwest::Client,
     method: axum::http::Method,
-    target: Url,
+    mut target: Url,
+    query: Option<&str>,
     access_token: &str,
     headers: &HeaderMap,
     body: Bytes,
 ) -> reqwest::RequestBuilder {
+    target.set_query(query);
     let mut request = client.request(method, target).bearer_auth(access_token);
     if let Some(content_type) = headers.get(header::CONTENT_TYPE) {
         request = request.header(header::CONTENT_TYPE, content_type);
@@ -465,8 +476,9 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let app = axum::Router::new().route(
             "/repos/owner/repo/issues",
-            axum::routing::post(|headers: HeaderMap, body: Bytes| async move {
+            axum::routing::post(|axum::extract::OriginalUri(uri): axum::extract::OriginalUri, headers: HeaderMap, body: Bytes| async move {
                 Json(json!({
+                    "query": uri.query(),
                     "user_agent": headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()),
                     "authorization": headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()),
                     "content_type": headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()),
@@ -489,6 +501,7 @@ mod tests {
                 &client,
                 axum::http::Method::POST,
                 Url::parse(&format!("http://{address}/repos/owner/repo/issues")).unwrap(),
+                Some("state=all&page=2&per_page=1&labels=a%2Cb"),
                 "test-provider-token",
                 &headers,
                 Bytes::from_static(b"{}"),
@@ -501,12 +514,50 @@ mod tests {
             .json::<serde_json::Value>()
             .await
             .unwrap();
+            assert_eq!(
+                response["query"],
+                "state=all&page=2&per_page=1&labels=a%2Cb"
+            );
             assert_eq!(response["user_agent"], "LocalThought-integration-proxy");
             assert_eq!(response["authorization"], "Bearer test-provider-token");
             assert_eq!(response["content_type"], "application/json");
             assert_eq!(response["body"], "{}");
         }
         server.abort();
+    }
+
+    #[test]
+    fn pagination_headers_survive_without_forwarding_provider_credentials() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        headers.append(
+            header::LINK,
+            HeaderValue::from_static(
+                "<https://api.github.com/repos/o/r/issues?page=2>; rel=\"next\"",
+            ),
+        );
+        headers.append(
+            header::LINK,
+            HeaderValue::from_static(
+                "<https://api.github.com/repos/o/r/issues?page=3>; rel=\"last\"",
+            ),
+        );
+        headers.insert(
+            header::SET_COOKIE,
+            HeaderValue::from_static("provider-session=private"),
+        );
+        headers.insert(
+            "x-connection-code",
+            HeaderValue::from_static("untrusted-provider-code"),
+        );
+        let forwarded = upstream_response_headers(&headers);
+        assert_eq!(forwarded.get_all(header::LINK).iter().count(), 2);
+        assert_eq!(forwarded[header::CONTENT_TYPE], "application/json");
+        assert!(!forwarded.contains_key(header::SET_COOKIE));
+        assert!(!forwarded.contains_key("x-connection-code"));
     }
 
     fn logged_in_jar(key: Key) -> (PrivateCookieJar, crate::session::SessionUser) {
