@@ -411,6 +411,9 @@ fn upstream_request(
     if let Some(content_type) = headers.get(header::CONTENT_TYPE) {
         request = request.header(header::CONTENT_TYPE, content_type);
     }
+    if let Some(etag) = headers.get(header::IF_MATCH) {
+        request = request.header(header::IF_MATCH, etag);
+    }
     request.body(body)
 }
 
@@ -482,6 +485,7 @@ mod tests {
                     "user_agent": headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()),
                     "authorization": headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()),
                     "content_type": headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()),
+                    "if_match": headers.get(header::IF_MATCH).and_then(|v| v.to_str().ok()),
                     "body": String::from_utf8(body.to_vec()).unwrap(),
                 }))
             }),
@@ -493,6 +497,10 @@ mod tests {
             headers.insert(
                 header::CONTENT_TYPE,
                 HeaderValue::from_static("application/json"),
+            );
+            headers.insert(
+                header::IF_MATCH,
+                HeaderValue::from_static("\"event-version\""),
             );
             if let Some(value) = caller_user_agent {
                 headers.insert(header::USER_AGENT, HeaderValue::from_static(value));
@@ -522,6 +530,7 @@ mod tests {
             assert_eq!(response["authorization"], "Bearer test-provider-token");
             assert_eq!(response["content_type"], "application/json");
             assert_eq!(response["body"], "{}");
+            assert_eq!(response["if_match"], "\"event-version\"");
         }
         server.abort();
     }

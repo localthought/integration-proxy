@@ -136,7 +136,11 @@ fn browser_cors() -> tower_http::cors::CorsLayer {
             Method::DELETE,
             Method::OPTIONS,
         ])
-        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            header::IF_MATCH,
+        ])
         .expose_headers([
             HeaderName::from_static("x-connection-code"),
             header::LINK,
@@ -223,8 +227,11 @@ mod browser_tests {
                     .method("OPTIONS")
                     .uri("/proxy/pets")
                     .header("origin", "https://atomic.example")
-                    .header("access-control-request-method", "GET")
-                    .header("access-control-request-headers", "authorization")
+                    .header("access-control-request-method", "PATCH")
+                    .header(
+                        "access-control-request-headers",
+                        "authorization,content-type,if-match",
+                    )
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -236,6 +243,10 @@ mod browser_tests {
             .to_str()
             .unwrap()
             .contains("authorization"));
+        assert!(response.headers()["access-control-allow-headers"]
+            .to_str()
+            .unwrap()
+            .contains("if-match"));
         assert!(!response
             .headers()
             .contains_key("access-control-allow-credentials"));
