@@ -113,7 +113,32 @@ fn path_matches(template: &str, path: &str) -> bool {
         && left
             .iter()
             .zip(right)
-            .all(|(a, b)| (a.starts_with('{') && a.ends_with('}')) || *a == b)
+            .all(|(template, path)| path_segment_matches(template, path))
+}
+
+fn path_segment_matches(template: &str, path: &str) -> bool {
+    let Some(open) = template.find('{') else {
+        return template == path;
+    };
+    let Some(close) = template[open + 1..].find('}') else {
+        return false;
+    };
+    let close = open + 1 + close;
+    // Keep the grammar deliberately small: one nonempty variable surrounded by
+    // literal text. This avoids treating arbitrary braces as a regex.
+    if template[close + 1..].contains(['{', '}'])
+        || template[..open].contains('}')
+        || template[open + 1..close].contains('{')
+        || template[open + 1..close].is_empty()
+    {
+        return false;
+    }
+    let prefix = &template[..open];
+    let suffix = &template[close + 1..];
+    path.starts_with(prefix)
+        && path.ends_with(suffix)
+        && path.len() >= prefix.len() + suffix.len()
+        && !path[prefix.len()..path.len() - suffix.len()].is_empty()
 }
 
 async fn fetch_yaml(client: &reqwest::Client, url: &str) -> Result<String, String> {
@@ -215,6 +240,52 @@ pub async fn document(Path(file): Path<String>, State(state): State<AppState>) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn matches_moneybird_parameterized_contact_paths() {
+        let template = "/{administration_id}/contacts/{id}.json";
+        assert!(path_matches(template, "/123/contacts/456.json"));
+        assert!(!path_matches(template, "/123/contacts/.json"));
+        assert!(!path_matches(template, "/123/contacts/456.xml"));
+        assert!(!path_matches(template, "/123/invoices/456.json"));
+    }
+
+    #[test]
+    fn rejects_malformed_or_ambiguous_path_variables() {
+        assert!(!path_matches("/{id", "/123"));
+        assert!(!path_matches("/{{id}", "/123"));
+        assert!(!path_matches("/{id}/{other}{third}", "/123/456789"));
+        assert!(!path_matches("/{id}/contacts", "//contacts"));
+    }
+
+    #[tokio::test]
+    #[ignore = "downloads the pinned production catalog sources"]
+    async fn pinned_moneybird_catalog_composes_and_allows_contacts() {
+        let catalog = Catalog::load("catalog.yaml", &crate::build_http_client())
+            .await
+            .unwrap();
+        assert!(catalog.names().contains(&"moneybird".to_string()));
+        let document: Value = serde_yaml::from_str(catalog.get("moneybird").unwrap()).unwrap();
+        assert!(document
+            .pointer("/components/crudResources/contact/collections/contacts")
+            .is_some());
+        let upstream = catalog
+            .allows("moneybird", "GET", "/api/v2/123/contacts.json")
+            .expect("Moneybird contacts path must include the server base path");
+        assert_eq!(upstream.as_str(), "https://moneybird.com/api/v2");
+        assert!(catalog
+            .allows("moneybird", "GET", "/api/v2/123/contacts/456.json")
+            .is_some());
+        assert!(catalog
+            .allows("moneybird", "POST", "/api/v2/123/contacts.json")
+            .is_none());
+        assert!(catalog
+            .allows("moneybird", "GET", "/123/contacts.json")
+            .is_none());
+        assert!(catalog
+            .allows("moneybird", "GET", "/api/v20/123/contacts.json")
+            .is_none());
+    }
     #[test]
     fn validates_google_endpoints_relative_to_server_base_path() {
         for server in [
@@ -339,7 +410,7 @@ mod tests {
     #[tokio::test]
     async fn router_reaches_parameterized_oauth_handlers() {
         let app = test_router();
-        for provider in ["github-issues", "google-calendar"] {
+        for provider in ["github-issues", "google-calendar", "moneybird"] {
             for (action, query) in [
                 ("start", "redirect_uri=https%3A%2F%2Fexample.com&ts=0&nonce=test&challenge=test&tenant_id=test&user_id=test&user_id_sig=test&response=test"),
                 ("callback", "code=test&state=test"),

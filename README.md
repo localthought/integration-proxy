@@ -105,6 +105,15 @@ available, and rotates the handoff code after every request.
 
 ## Catalog
 
+Moneybird uses `OAUTH_MONEYBIRD_CLIENT_ID` and
+`OAUTH_MONEYBIRD_CLIENT_SECRET`, with callback
+`https://localthought.io/oauth/moneybird/callback` in production. Register an
+external OAuth application, rather than a personal API token. The
+`sales_invoices` scope grants access to contacts (Moneybird has no contacts-only
+scope). The initial integration imports contacts; supply the administration ID
+from the Moneybird account when connecting. OAuth tokens without `expires_in`
+remain usable until revoked; tokens with an expiry use the normal refresh flow.
+
 `catalog.yaml` is the source of the integration catalog. Each platform names
 one pinned OpenAPI document and zero or more pinned Overlay Specification
 documents. At startup the proxy downloads those HTTPS sources, applies each
