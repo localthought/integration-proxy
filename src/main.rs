@@ -41,6 +41,14 @@ impl FromRef<AppState> for Key {
     }
 }
 
+fn build_http_client() -> reqwest::Client {
+    // GitHub's REST API requires a User-Agent on every request.
+    reqwest::Client::builder()
+        .user_agent("LocalThought-integration-proxy")
+        .build()
+        .expect("failed to build HTTP client")
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -67,8 +75,8 @@ async fn main() {
         }
     };
 
-    let catalog = match catalog::Catalog::load(&config.catalog_path, &reqwest::Client::new()).await
-    {
+    let http_client = build_http_client();
+    let catalog = match catalog::Catalog::load(&config.catalog_path, &http_client).await {
         Ok(catalog) => catalog,
         Err(err) => {
             eprintln!("catalog configuration error: {err}");
@@ -94,7 +102,7 @@ async fn main() {
     let base_url = config.base_url.clone();
     let state = AppState {
         oauth_client,
-        http_client: reqwest::Client::new(),
+        http_client,
         key,
         server_secret,
         base_url,

@@ -324,14 +324,17 @@ pub async fn forward(
             .into_response();
     };
     target.set_path(&request_path);
-    let mut request = state
-        .http_client
-        .request(method, target)
-        .bearer_auth(&credential.access_token);
-    if let Some(content_type) = headers.get(header::CONTENT_TYPE) {
-        request = request.header(header::CONTENT_TYPE, content_type);
-    }
-    let upstream = match request.body(body).send().await {
+    let upstream = match upstream_request(
+        &state.http_client,
+        method,
+        target,
+        &credential.access_token,
+        &headers,
+        body,
+    )
+    .send()
+    .await
+    {
         Ok(response) => response,
         Err(_) => return (StatusCode::BAD_GATEWAY, "upstream request failed").into_response(),
     };
@@ -385,6 +388,21 @@ pub async fn forward(
     response
 }
 
+fn upstream_request(
+    client: &reqwest::Client,
+    method: axum::http::Method,
+    target: Url,
+    access_token: &str,
+    headers: &HeaderMap,
+    body: Bytes,
+) -> reqwest::RequestBuilder {
+    let mut request = client.request(method, target).bearer_auth(access_token);
+    if let Some(content_type) = headers.get(header::CONTENT_TYPE) {
+        request = request.header(header::CONTENT_TYPE, content_type);
+    }
+    request.body(body)
+}
+
 #[derive(Debug)]
 pub enum ConnectError {
     InvalidRedirect,
@@ -432,13 +450,63 @@ mod tests {
         };
         AppState {
             oauth_client: crate::auth::build_client(&config).unwrap(),
-            http_client: reqwest::Client::new(),
+            http_client: crate::build_http_client(),
             key: Key::generate(),
             server_secret: config.server_secret,
             base_url: config.base_url,
             catalog: crate::catalog::Catalog::default(),
             security: None,
         }
+    }
+
+    #[tokio::test]
+    async fn forwarded_requests_include_server_owned_user_agent() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = axum::Router::new().route(
+            "/repos/owner/repo/issues",
+            axum::routing::post(|headers: HeaderMap, body: Bytes| async move {
+                Json(json!({
+                    "user_agent": headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()),
+                    "authorization": headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()),
+                    "content_type": headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()),
+                    "body": String::from_utf8(body.to_vec()).unwrap(),
+                }))
+            }),
+        );
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = crate::build_http_client();
+        for caller_user_agent in [None, Some("caller-controlled-agent")] {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            );
+            if let Some(value) = caller_user_agent {
+                headers.insert(header::USER_AGENT, HeaderValue::from_static(value));
+            }
+            let response = upstream_request(
+                &client,
+                axum::http::Method::POST,
+                Url::parse(&format!("http://{address}/repos/owner/repo/issues")).unwrap(),
+                "test-provider-token",
+                &headers,
+                Bytes::from_static(b"{}"),
+            )
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json::<serde_json::Value>()
+            .await
+            .unwrap();
+            assert_eq!(response["user_agent"], "LocalThought-integration-proxy");
+            assert_eq!(response["authorization"], "Bearer test-provider-token");
+            assert_eq!(response["content_type"], "application/json");
+            assert_eq!(response["body"], "{}");
+        }
+        server.abort();
     }
 
     fn logged_in_jar(key: Key) -> (PrivateCookieJar, crate::session::SessionUser) {
