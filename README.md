@@ -157,3 +157,12 @@ controls in [SECURITY.md](SECURITY.md) are in place.
 - The pending `/connect` redirect (used to return to `/connect` after a
   login detour) is held in a short-lived encrypted cookie
   (`connect_redirect`), the same pattern as `oauth_state`.
+
+## Browser clients
+
+CORS permits explicit bearer-token requests from browser frontends and answers
+OPTIONS preflights. Responses expose `X-Connection-Code`, `Link`, `Retry-After`,
+`ETag`, `X-Total-Count` and `X-Next-Page`. Clients must persist a rotated code
+before continuing pagination and must never replay a consumed code after an
+uncertain response. Cookie credentials are not enabled for CORS; provider
+login and consent remain top-level browser navigations.

@@ -121,6 +121,32 @@ async fn main() {
     axum::serve(listener, app).await.expect("server error");
 }
 
+// Bearer credentials are explicitly supplied by the browser. Never enable
+// cookie credentials: login/consent remain top-level navigations.
+fn browser_cors() -> tower_http::cors::CorsLayer {
+    use axum::http::{header, HeaderName, Method};
+    use tower_http::cors::{Any, CorsLayer};
+    CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+        .expose_headers([
+            HeaderName::from_static("x-connection-code"),
+            header::LINK,
+            header::RETRY_AFTER,
+            header::ETAG,
+            HeaderName::from_static("x-total-count"),
+            HeaderName::from_static("x-next-page"),
+        ])
+}
+
 fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(home))
@@ -138,6 +164,7 @@ fn router(state: AppState) -> Router {
         .route("/oauth/:provider/callback", get(oauth::callback))
         .route("/catalog", get(catalog::list))
         .route("/catalog/:file", get(catalog::document))
+        .layer(browser_cors())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -151,4 +178,70 @@ async fn home(State(state): State<AppState>, jar: PrivateCookieJar) -> Html<Stri
         user.as_ref(),
         tenant_secret.as_deref(),
     ))
+}
+
+#[cfg(test)]
+mod browser_tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn browser_preflight_and_rotation_headers() {
+        let app = Router::new()
+            .route(
+                "/proxy/pets",
+                get(|| async {
+                    (
+                        [
+                            ("x-connection-code", "rotated"),
+                            ("link", "</next>; rel=next"),
+                        ],
+                        "[]",
+                    )
+                }),
+            )
+            .layer(browser_cors());
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri("/proxy/pets")
+                    .header("origin", "https://atomic.example")
+                    .header("access-control-request-method", "GET")
+                    .header("access-control-request-headers", "authorization")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["access-control-allow-origin"], "*");
+        assert!(response.headers()["access-control-allow-headers"]
+            .to_str()
+            .unwrap()
+            .contains("authorization"));
+        assert!(!response
+            .headers()
+            .contains_key("access-control-allow-credentials"));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/proxy/pets")
+                    .header("origin", "https://atomic.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let exposed = response.headers()["access-control-expose-headers"]
+            .to_str()
+            .unwrap();
+        assert!(exposed.contains("x-connection-code"));
+        assert!(exposed.contains("link"));
+    }
 }
