@@ -206,6 +206,102 @@ pub async fn document(Path(file): Path<String>, State(state): State<AppState>) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::{to_bytes, Body},
+        http::Request,
+    };
+    use tower::ServiceExt;
+
+    fn test_router() -> axum::Router {
+        let config: CatalogConfig = serde_yaml::from_str(include_str!("../catalog.yaml")).unwrap();
+        let documents = config
+            .platforms
+            .into_iter()
+            .map(|platform| {
+                (
+                    platform.name,
+                    "openapi: 3.0.0\ninfo: {title: Test, version: '1'}\npaths: {}\n".to_string(),
+                )
+            })
+            .collect();
+        crate::router(AppState {
+            oauth_client: oauth2::basic::BasicClient::new(
+                oauth2::ClientId::new("test".into()),
+                None,
+                oauth2::AuthUrl::new("https://example.com/auth".into()).unwrap(),
+                None,
+            ),
+            http_client: reqwest::Client::new(),
+            key: axum_extra::extract::cookie::Key::generate(),
+            server_secret: "test".into(),
+            base_url: "http://localhost".into(),
+            catalog: Catalog { documents },
+            security: None,
+        })
+    }
+
+    #[tokio::test]
+    async fn router_serves_every_advertised_catalog_document() {
+        let app = test_router();
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/catalog")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let names: Vec<String> =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert!(!names.is_empty());
+        for name in names {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/catalog/{name}.yaml"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{name}");
+            let document: Value =
+                serde_yaml::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                    .unwrap();
+            assert_eq!(document["openapi"], "3.0.0");
+            assert!(document["paths"].is_object());
+        }
+        for path in ["/catalog/unknown.yaml", "/catalog/github-issues.json"] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
+    }
+
+    #[tokio::test]
+    async fn router_reaches_parameterized_oauth_handlers() {
+        let app = test_router();
+        for provider in ["github-issues", "google-calendar"] {
+            for (action, query) in [
+                ("start", "redirect_uri=https%3A%2F%2Fexample.com&ts=0&nonce=test&challenge=test&tenant_id=test&user_id=test&user_id_sig=test&response=test"),
+                ("callback", "code=test&state=test"),
+            ] {
+                let response = app.clone().oneshot(Request::builder().uri(format!("/oauth/{provider}/{action}?{query}")).body(Body::empty()).unwrap()).await.unwrap();
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{provider}/{action}");
+                let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+                assert_eq!(&body[..], b"OAuth request could not be completed");
+            }
+        }
+    }
+
     #[test]
     fn target_parser_supports_overlay_paths() {
         assert_eq!(
