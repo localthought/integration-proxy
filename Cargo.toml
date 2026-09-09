@@ -25,6 +25,8 @@ time = "0.3"
 sha2 = "0.10"
 hmac = "0.12"
 tokio-postgres = "0.7"
+postgres-native-tls = "0.5"
+native-tls = "0.2"
 chacha20poly1305 = "0.10"
 
 [profile.release]
