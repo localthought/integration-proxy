@@ -261,12 +261,19 @@ async fn refresh_if_needed(state: &AppState, credential: &mut Credential) -> Res
 }
 
 pub async fn forward(
-    Path((platform, path)): Path<(String, String)>,
+    Path(path): Path<String>,
     State(state): State<AppState>,
     method: axum::http::Method,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    let Some((platform, path)) = path.split_once('/') else {
+        return (
+            StatusCode::NOT_FOUND,
+            "proxy platform and path are required",
+        )
+            .into_response();
+    };
     if body.len() > 1_048_576 {
         return (StatusCode::PAYLOAD_TOO_LARGE, "request body is too large").into_response();
     }
@@ -308,7 +315,7 @@ pub async fn forward(
     let request_path = format!("/{path}");
     let Some(mut target) = state
         .catalog
-        .allows(&platform, method.as_str(), &request_path)
+        .allows(platform, method.as_str(), &request_path)
     else {
         return (
             StatusCode::NOT_FOUND,
