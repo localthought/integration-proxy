@@ -50,6 +50,13 @@ pub fn known(name: &str) -> Option<Provider> {
             token_url: "https://github.com/login/oauth/access_token",
             scopes: &["repo"],
         }),
+        "moneybird" => Some(Provider {
+            name: "moneybird",
+            authorization_url: "https://moneybird.com/oauth/authorize",
+            token_url: "https://moneybird.com/oauth/token",
+            // Moneybird has no contacts-only scope; sales_invoices grants contacts access.
+            scopes: &["sales_invoices"],
+        }),
         _ => None,
     }
 }
@@ -57,6 +64,21 @@ pub fn known(name: &str) -> Option<Provider> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn moneybird_uses_contacts_scope_and_official_oauth_endpoints() {
+        let provider = known("moneybird").expect("Moneybird must be supported");
+        assert_eq!(
+            provider.authorization_url,
+            "https://moneybird.com/oauth/authorize"
+        );
+        assert_eq!(provider.token_url, "https://moneybird.com/oauth/token");
+        assert_eq!(provider.scopes, ["sales_invoices"]);
+        assert_eq!(
+            Config::provider_env_prefix(provider.name).unwrap(),
+            "OAUTH_MONEYBIRD"
+        );
+    }
+
     #[test]
     fn providers_are_server_owned_and_narrowly_scoped() {
         let google = known("google-calendar").unwrap();
