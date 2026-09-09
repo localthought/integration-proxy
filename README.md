@@ -94,6 +94,9 @@ The server owns the OAuth endpoints and scopes. The built-in providers are
 `google-calendar` (read-only Calendar scope) and `github-issues` (`repo`
 scope); a request cannot supply a provider URL, token URL, or scope.
 
+The PostgreSQL client validates the database TLS certificate. Heroku assigns
+`DATABASE_URL` automatically when its Postgres add-on is attached.
+
 Use the `connection_code` returned by the OAuth redirect as the Bearer token
 for `/proxy/{platform}/{path}`. Each successful proxy response includes a new
 single-use value in `X-Connection-Code`; use that value for the next request.

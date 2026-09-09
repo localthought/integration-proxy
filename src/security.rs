@@ -27,7 +27,9 @@ impl Security {
         let encryption_key: [u8; 32] = key
             .try_into()
             .map_err(|_| "ENCRYPTION_KEY must decode to exactly 32 bytes")?;
-        let (database, connection) = tokio_postgres::connect(database_url, tokio_postgres::NoTls)
+        let tls = native_tls::TlsConnector::new().map_err(|e| e.to_string())?;
+        let tls = postgres_native_tls::MakeTlsConnector::new(tls);
+        let (database, connection) = tokio_postgres::connect(database_url, tls)
             .await
             .map_err(|e| e.to_string())?;
         tokio::spawn(async move {
