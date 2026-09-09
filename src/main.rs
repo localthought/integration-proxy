@@ -112,10 +112,7 @@ async fn main() {
             get(proxy::connect_page).post(proxy::connect_confirm),
         )
         .route("/proxy", axum::routing::any(proxy::proxy))
-        .route(
-            "/proxy/{platform}/{*path}",
-            axum::routing::any(proxy::forward),
-        )
+        .route("/proxy/{*path}", axum::routing::any(proxy::forward))
         .route("/session", get(proxy::session_challenge))
         .route("/oauth/{provider}/start", get(oauth::start))
         .route("/oauth/{provider}/callback", get(oauth::callback))
