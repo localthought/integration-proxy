@@ -42,7 +42,7 @@ Authorization Code flow with PKCE.
 
 The signed-in home page displays the Google identity, without displaying credentials. Tenant secrets are deterministic HMAC credentials derived from the stable Google subject and `SERVER_SECRET`; existing credentials remain valid. Provider access/refresh tokens are encrypted at rest and never returned to the hub. The hub receives a rotating opaque proxy credential through the protected exchange.
 
-The new consent, provider-state binding and one-time handoff work alongside the existing OAuth and proxy routes. The database migration adds a nullable OAuth context column and a `connection_handoffs` table without invalidating existing connection codes. Google/provider OAuth app registrations and callback URLs do not change.
+The new consent, provider-state binding and one-time handoff work alongside the existing OAuth and proxy routes. The database migration adds a nullable OAuth context column and a `connection_handoffs` table without invalidating existing connection codes. Schema initialization runs in a transaction under a PostgreSQL advisory lock, so simultaneous app instances can safely start against an empty database. Google/provider OAuth app registrations and callback URLs do not change.
 
 All cookies are set with `axum-extra`'s `PrivateCookieJar`, which
 encrypts and authenticates their contents, so the server never needs to
@@ -214,4 +214,4 @@ OAUTH_GITHUB_ISSUES_CLIENT_ID=fixture-client OAUTH_GITHUB_ISSUES_CLIENT_SECRET=f
   cargo test -- --include-ignored
 ```
 
-CI provides PostgreSQL and includes the database tests. Coverage includes selected-platform rendering and escaping, credential-free sign-in, return-address validation, PKCE, consent/session requirements, handoff expiry, wrong-verifier refusal, concurrent/replayed redemption, optional tenant-secret grants, revocation and provider-cookie/account binding. Live Google/GitHub authorization and a hub read-only import must be verified against both matching deployed revisions; local fixture checks do not establish live access.
+CI provides PostgreSQL and includes the database tests. Coverage includes concurrent cold-start schema initialization, selected-platform rendering and escaping, credential-free sign-in, return-address validation, PKCE, consent/session requirements, handoff expiry, wrong-verifier refusal, concurrent/replayed redemption, optional tenant-secret grants, revocation and provider-cookie/account binding. Live Google/GitHub authorization and a hub read-only import must be verified against both matching deployed revisions; local fixture checks do not establish live access.
