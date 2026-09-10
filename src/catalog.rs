@@ -313,11 +313,44 @@ mod tests {
     #[tokio::test]
     #[ignore = "downloads the pinned production catalog sources"]
     async fn pinned_catalog_supplies_oauth_and_canonical_pagination_paths() {
-        let catalog = Catalog::load("https://raw.githubusercontent.com/localthought/overlays/a53b5e75641dabc04af18813348312edcd453bf9/catalog.json", &crate::build_http_client()).await.unwrap();
+        let path = std::env::var("TEST_CATALOG_PATH").unwrap_or_else(|_| "https://raw.githubusercontent.com/localthought/overlays/d83c3ce0afd9f8ca0e4c42e142fa89d5fa9d8f70/catalog.json".into());
+        let catalog = Catalog::load(&path, &crate::build_http_client())
+            .await
+            .unwrap();
         for name in catalog.names() {
-            let provider = catalog.oauth_provider(&name).unwrap();
+            let provider = catalog
+                .oauth_provider(&name)
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
             assert!(!provider.scopes.is_empty(), "{name}");
         }
+        let moneybird: Value = serde_yaml::from_str(catalog.get("moneybird").unwrap()).unwrap();
+        let resources = moneybird
+            .pointer("/components/crudResources")
+            .unwrap()
+            .as_object()
+            .unwrap();
+        let collection_count: usize = resources
+            .values()
+            .filter_map(|r| r.get("collections").and_then(Value::as_object))
+            .map(|c| c.len())
+            .sum();
+        assert_eq!(collection_count, 32);
+        assert_eq!(
+            catalog.selections["moneybird"]["query_overrides"]
+                .as_array()
+                .unwrap()
+                .len(),
+            6
+        );
+        assert!(moneybird.get("selection").is_none());
+        assert_eq!(
+            moneybird.pointer("/x-throttling/limits/apiRequests/requests"),
+            Some(&serde_json::json!(150))
+        );
+        assert_eq!(
+            moneybird.pointer("/x-throttling/limits/apiRequests/window/kind"),
+            Some(&serde_json::json!("unspecified"))
+        );
         assert!(catalog
             .allows("github-issues", "GET", "/repositories/123/issues")
             .is_some());
