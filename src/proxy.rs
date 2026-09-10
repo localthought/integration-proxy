@@ -408,7 +408,7 @@ pub async fn forward(
 // Forward only representation/pagination metadata, never provider cookies or credentials.
 fn upstream_response_headers(headers: &HeaderMap) -> HeaderMap {
     let mut result = HeaderMap::new();
-    for name in [header::CONTENT_TYPE, header::LINK] {
+    for name in [header::CONTENT_TYPE, header::LINK, header::RETRY_AFTER] {
         for value in headers.get_all(&name) {
             result.append(name.clone(), value.clone());
         }
@@ -655,7 +655,9 @@ mod tests {
             "x-connection-code",
             HeaderValue::from_static("untrusted-provider-code"),
         );
+        headers.insert(header::RETRY_AFTER, HeaderValue::from_static("300"));
         let forwarded = upstream_response_headers(&headers);
+        assert_eq!(forwarded.get(header::RETRY_AFTER), Some(&HeaderValue::from_static("300")));
         assert_eq!(forwarded.get_all(header::LINK).iter().count(), 2);
         assert_eq!(forwarded[header::CONTENT_TYPE], "application/json");
         assert!(!forwarded.contains_key(header::SET_COOKIE));
