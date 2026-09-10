@@ -130,7 +130,16 @@ impl Catalog {
     pub fn oauth_provider(&self, platform: &str) -> Result<crate::providers::Provider, String> {
         let source = self.get(platform).ok_or("unknown catalog platform")?;
         let document = serde_yaml::from_str(source).map_err(|_| "invalid catalog document")?;
-        crate::providers::Provider::from_document(&document)
+        let scheme = match self
+            .selections
+            .get(platform)
+            .and_then(|selection| selection.get("oauthSecurityScheme"))
+        {
+            Some(Value::String(scheme)) => Some(scheme.as_str()),
+            Some(_) => return Err("oauthSecurityScheme selection must be a string".into()),
+            None => None,
+        };
+        crate::providers::Provider::from_document(&document, scheme)
     }
     fn get(&self, platform: &str) -> Option<&str> {
         self.documents.get(platform).map(String::as_str)
@@ -322,6 +331,24 @@ mod tests {
         assert!(catalog
             .allows("github-issues", "POST", "/repositories/123/issues")
             .is_none());
+    }
+
+    #[tokio::test]
+    #[ignore = "downloads pinned OAuth authentication-details metadata"]
+    async fn pinned_catalog_selects_google_offline_and_spotify_pkce_profiles() {
+        let catalog = Catalog::load(
+            "https://raw.githubusercontent.com/localthought/overlays/d83c3ce0afd9f8ca0e4c42e142fa89d5fa9d8f70/catalog.json",
+            &crate::build_http_client(),
+        )
+        .await
+        .unwrap();
+        let google = catalog.oauth_provider("google-calendar").unwrap();
+        assert!(google.use_pkce);
+        assert!(google
+            .authorization_params
+            .contains(&("access_type".into(), "offline".into())));
+        let spotify = catalog.oauth_provider("spotify").unwrap();
+        assert!(spotify.use_pkce);
     }
 
     #[tokio::test]
@@ -670,6 +697,19 @@ mod tests {
             "fixture"
         )
         .is_err());
+    }
+
+    #[test]
+    fn oauth_scheme_selection_rejects_non_string_values() {
+        let mut catalog = Catalog::for_test("fixture");
+        catalog.selections.insert(
+            "fixture".into(),
+            serde_json::json!({"oauthSecurityScheme": null}),
+        );
+        assert_eq!(
+            catalog.oauth_provider("fixture").unwrap_err(),
+            "oauthSecurityScheme selection must be a string"
+        );
     }
 
     #[tokio::test]

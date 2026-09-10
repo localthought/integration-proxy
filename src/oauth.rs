@@ -63,6 +63,17 @@ fn error() -> Response {
         .into_response()
 }
 
+fn append_provider_authorization(url: &mut Url, provider: &Provider, challenge: &str) {
+    for (key, value) in &provider.authorization_params {
+        url.query_pairs_mut().append_pair(key, value);
+    }
+    if provider.use_pkce {
+        url.query_pairs_mut()
+            .append_pair("code_challenge", challenge)
+            .append_pair("code_challenge_method", "S256");
+    }
+}
+
 pub async fn start(
     Path(name): Path<String>,
     State(state): State<AppState>,
@@ -137,9 +148,8 @@ pub async fn begin(
         .append_pair("client_id", &provider.client_id)
         .append_pair("redirect_uri", &callback)
         .append_pair("scope", &provider.provider.scopes.join(" "))
-        .append_pair("state", &oauth_state)
-        .append_pair("code_challenge", &challenge)
-        .append_pair("code_challenge_method", "S256");
+        .append_pair("state", &oauth_state);
+    append_provider_authorization(&mut url, &provider.provider, &challenge);
     Ok(url.into())
 }
 
@@ -214,16 +224,16 @@ async fn callback_response(
         state.base_url.trim_end_matches('/'),
         name
     );
+    let mut params = vec![
+        ("grant_type", "authorization_code"),
+        ("code", code.as_str()),
+        ("redirect_uri", callback.as_str()),
+    ];
+    if provider.provider.use_pkce {
+        params.push(("code_verifier", verifier.as_str()));
+    }
     let response = match provider
-        .token_request(
-            &state.http_client,
-            &[
-                ("grant_type", "authorization_code"),
-                ("code", code.as_str()),
-                ("redirect_uri", callback.as_str()),
-                ("code_verifier", verifier.as_str()),
-            ],
-        )
+        .token_request(&state.http_client, &params)
         .send()
         .await
     {
@@ -281,4 +291,69 @@ async fn callback_response(
         Redirect::to(redirect.as_str()),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn document(requirement: &str) -> serde_json::Value {
+        let mut document = serde_json::json!({
+            "components": {
+                "parameters": {"accessType": {
+                    "name": "access_type", "in": "query",
+                    "schema": {"type": "string", "enum": ["offline"]}
+                }},
+                "securitySchemes": {"auth": {
+                    "type": "oauth2",
+                    "x-oauth-authentication-details": {
+                        "authorizationServerMetadata": {
+                            "code_challenge_methods_supported": ["S256"]
+                        },
+                        "authorizationCode": {
+                            "pkce": {"requirement": requirement},
+                            "profile": {"parameters": [{
+                                "parameter": {"$ref": "#/components/parameters/accessType"},
+                                "value": "offline"
+                            }]}
+                        }
+                    },
+                    "flows": {"authorizationCode": {
+                        "authorizationUrl": "https://auth.example/authorize",
+                        "tokenUrl": "https://auth.example/token",
+                        "scopes": {"read": "Read"}
+                    }}
+                }}
+            },
+            "security": [{"auth": ["read"]}],
+            "paths": {}
+        });
+        if requirement == "unsupported" {
+            document["components"]["securitySchemes"]["auth"]["x-oauth-authentication-details"]
+                ["authorizationServerMetadata"]
+                .as_object_mut()
+                .unwrap()
+                .remove("code_challenge_methods_supported");
+        }
+        document
+    }
+
+    #[test]
+    fn authorization_details_add_trusted_profile_values_and_only_supported_pkce() {
+        for (requirement, expects_pkce) in [("required", true), ("unsupported", false)] {
+            let provider = Provider::from_document(&document(requirement), None).unwrap();
+            let mut url = Url::parse(&provider.authorization_url).unwrap();
+            append_provider_authorization(&mut url, &provider, "challenge");
+            let pairs: Vec<_> = url.query_pairs().into_owned().collect();
+            assert!(pairs.contains(&("access_type".into(), "offline".into())));
+            assert_eq!(
+                pairs.iter().any(|(key, _)| key == "code_challenge"),
+                expects_pkce
+            );
+            assert_eq!(
+                pairs.iter().any(|(key, _)| key == "code_challenge_method"),
+                expects_pkce
+            );
+        }
+    }
 }
