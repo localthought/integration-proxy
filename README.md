@@ -105,6 +105,16 @@ available, and rotates the handoff code after every request.
 
 ## Catalog
 
+Discord uses `OAUTH_DISCORD_CLIENT_ID` and `OAUTH_DISCORD_CLIENT_SECRET`,
+with production callback `https://localthought.io/oauth/discord/callback`.
+Register an OAuth application in the Discord Developer Portal. The initial
+read-only integration uses `identify` and `guilds` to read your profile and
+import server memberships; it does not import messages or require a bot token.
+The guild import requests `limit=200`, covering Discord's documented maximum
+number of guilds for a user. The profile endpoint is available as a read
+operation, not an imported collection.
+Discord access tokens expire and use the existing refresh-token flow.
+
 Spotify uses `OAUTH_SPOTIFY_CLIENT_ID` and the callback
 `https://localthought.io/oauth/spotify/callback` in production. Register a
 Spotify Web API app with that exact redirect URI. The integration uses

@@ -74,6 +74,12 @@ pub fn known(name: &str) -> Option<Provider> {
             token_url: "https://github.com/login/oauth/access_token",
             scopes: &["repo"],
         }),
+        "discord" => Some(Provider {
+            name: "discord",
+            authorization_url: "https://discord.com/oauth2/authorize",
+            token_url: "https://discord.com/api/v10/oauth2/token",
+            scopes: &["identify", "guilds"],
+        }),
         "spotify" => Some(Provider {
             name: "spotify",
             authorization_url: "https://accounts.spotify.com/authorize",
@@ -100,6 +106,24 @@ pub fn known(name: &str) -> Option<Provider> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn discord_uses_read_only_user_scopes_and_official_endpoints() {
+        let provider = known("discord").expect("Discord must be supported");
+        assert_eq!(
+            provider.authorization_url,
+            "https://discord.com/oauth2/authorize"
+        );
+        assert_eq!(
+            provider.token_url,
+            "https://discord.com/api/v10/oauth2/token"
+        );
+        assert_eq!(provider.scopes, ["identify", "guilds"]);
+        assert_eq!(
+            Config::provider_env_prefix(provider.name).unwrap(),
+            "OAUTH_DISCORD"
+        );
+    }
+
     #[test]
     fn todoist_uses_read_only_scope_and_official_oauth_endpoints() {
         let provider = known("todoist").expect("Todoist must be supported");

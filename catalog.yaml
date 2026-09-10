@@ -32,3 +32,9 @@ platforms:
       - https://raw.githubusercontent.com/localthought/overlays/2b6e05249a1e903ea1297423b1be202319e389b7/spotify.com/1.0.0-readonly/auth-overlay.yaml
       - https://raw.githubusercontent.com/localthought/overlays/2b6e05249a1e903ea1297423b1be202319e389b7/spotify.com/1.0.0-readonly/pagination-overlay.yaml
       - https://raw.githubusercontent.com/localthought/overlays/2b6e05249a1e903ea1297423b1be202319e389b7/spotify.com/1.0.0-readonly/crud-causality-overlay.yaml
+  - name: discord
+    openapi: https://raw.githubusercontent.com/localthought/openapi-directory/4087a087b080acd1931b39cc942bb7ef92b32e4e/APIs/discord.com/v10-readonly/openapi.yaml
+    overlays:
+      - https://raw.githubusercontent.com/localthought/overlays/39224b665a9db71d92112acfab40003d6c0bc7b5/discord.com/api/v10/auth-overlay.yaml
+      - https://raw.githubusercontent.com/localthought/overlays/39224b665a9db71d92112acfab40003d6c0bc7b5/discord.com/api/v10/pagination-overlay.yaml
+      - https://raw.githubusercontent.com/localthought/overlays/39224b665a9db71d92112acfab40003d6c0bc7b5/discord.com/api/v10/crud-causality-overlay.yaml

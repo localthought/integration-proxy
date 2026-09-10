@@ -279,6 +279,53 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    #[ignore = "downloads the pinned production catalog sources"]
+    async fn pinned_discord_catalog_composes_and_allows_only_user_reads() {
+        let catalog = Catalog::load("catalog.yaml", &crate::build_http_client())
+            .await
+            .unwrap();
+        let document: Value = serde_yaml::from_str(catalog.get("discord").unwrap()).unwrap();
+        assert!(document
+            .pointer("/components/crudResources/guild")
+            .is_some());
+        for path in ["/api/v10/users/@me", "/api/v10/users/@me/guilds"] {
+            assert_eq!(
+                catalog.allows("discord", "GET", path).unwrap().as_str(),
+                "https://discord.com/api/v10"
+            );
+            assert!(catalog.allows("discord", "POST", path).is_none());
+        }
+        assert!(catalog
+            .allows("discord", "GET", "/api/v10/channels/123/messages")
+            .is_none());
+        assert!(catalog
+            .allows("discord", "GET", "/users/@me/guilds")
+            .is_none());
+    }
+
+    #[test]
+    fn discord_only_allows_profile_and_membership_reads_with_api_prefix() {
+        let catalog = Catalog { documents: BTreeMap::from([("discord".into(),
+            "servers:\n  - url: https://discord.com/api/v10\npaths:\n  /users/@me:\n    get: {}\n  /users/@me/guilds:\n    get: {}\n".into())]) };
+        for path in ["/api/v10/users/@me", "/api/v10/users/@me/guilds"] {
+            assert_eq!(
+                catalog.allows("discord", "GET", path).unwrap().as_str(),
+                "https://discord.com/api/v10"
+            );
+            assert!(catalog.allows("discord", "POST", path).is_none());
+            assert!(catalog.allows("discord", "DELETE", path).is_none());
+        }
+        for path in [
+            "/users/@me",
+            "/api/v100/users/@me",
+            "/api/v10/users/123",
+            "/api/v10/channels/123/messages",
+        ] {
+            assert!(catalog.allows("discord", "GET", path).is_none());
+        }
+    }
+
     #[test]
     fn matches_moneybird_parameterized_contact_paths() {
         let template = "/{administration_id}/contacts/{id}.json";
@@ -482,7 +529,7 @@ mod tests {
     #[tokio::test]
     async fn router_reaches_parameterized_oauth_handlers() {
         let app = test_router();
-        for provider in ["github-issues", "google-calendar", "moneybird"] {
+        for provider in ["github-issues", "google-calendar", "moneybird", "discord"] {
             for (action, query) in [
                 ("start", "redirect_uri=https%3A%2F%2Fexample.com&ts=0&nonce=test&challenge=test&tenant_id=test&user_id=test&user_id_sig=test&response=test"),
                 ("callback", "code=test&state=test"),
