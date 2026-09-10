@@ -8,6 +8,15 @@ use chacha20poly1305::{
 use rand::RngCore;
 use tokio_postgres::Client;
 
+pub struct OAuthState {
+    pub provider: String,
+    pub redirect_uri: String,
+    pub tenant_id: String,
+    pub user_id: String,
+    pub verifier: String,
+    pub context: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct Security {
     database: Arc<Client>,
@@ -39,6 +48,7 @@ impl Security {
         });
         database.batch_execute("CREATE TABLE IF NOT EXISTS used_challenges (nonce TEXT PRIMARY KEY, expires_at TIMESTAMPTZ NOT NULL)").await.map_err(|e| e.to_string())?;
         database.batch_execute("CREATE TABLE IF NOT EXISTS oauth_states (state TEXT PRIMARY KEY, provider TEXT NOT NULL, redirect_uri TEXT NOT NULL, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, verifier TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL); CREATE TABLE IF NOT EXISTS connection_codes (code TEXT PRIMARY KEY, envelope TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL)").await.map_err(|e| e.to_string())?;
+        database.batch_execute("ALTER TABLE oauth_states ADD COLUMN IF NOT EXISTS context TEXT; CREATE TABLE IF NOT EXISTS connection_handoffs (code TEXT PRIMARY KEY, challenge TEXT NOT NULL, envelope TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL)").await.map_err(|e| e.to_string())?;
         Ok(Self {
             database: Arc::new(database),
             encryption_key,
@@ -104,25 +114,47 @@ impl Security {
             .ok()
     }
 
-    pub async fn store_oauth_state(
-        &self,
-        state: &str,
-        provider: &str,
-        redirect_uri: &str,
-        tenant_id: &str,
-        user_id: &str,
-        verifier: &str,
-    ) -> Result<(), String> {
-        self.database.execute("INSERT INTO oauth_states (state, provider, redirect_uri, tenant_id, user_id, verifier, expires_at) VALUES ($1,$2,$3,$4,$5,$6,NOW() + INTERVAL '10 minutes')", &[&state, &provider, &redirect_uri, &tenant_id, &user_id, &verifier]).await.map_err(|e| e.to_string())?;
+    pub async fn store_oauth_state(&self, state: &str, value: &OAuthState) -> Result<(), String> {
+        self.database.execute("INSERT INTO oauth_states (state, provider, redirect_uri, tenant_id, user_id, verifier, context, expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW() + INTERVAL '10 minutes')", &[&state, &value.provider, &value.redirect_uri, &value.tenant_id, &value.user_id, &value.verifier, &value.context]).await.map_err(|e| e.to_string())?;
         Ok(())
     }
 
-    pub async fn take_oauth_state(
+    pub async fn take_oauth_state(&self, state: &str) -> Result<Option<OAuthState>, String> {
+        let row = self.database.query_opt("DELETE FROM oauth_states WHERE state = $1 AND expires_at > NOW() RETURNING provider, redirect_uri, tenant_id, user_id, verifier, context", &[&state]).await.map_err(|e| e.to_string())?;
+        Ok(row.map(|r| OAuthState {
+            provider: r.get(0),
+            redirect_uri: r.get(1),
+            tenant_id: r.get(2),
+            user_id: r.get(3),
+            verifier: r.get(4),
+            context: r.get(5),
+        }))
+    }
+
+    pub async fn store_handoff(
         &self,
-        state: &str,
-    ) -> Result<Option<(String, String, String, String, String)>, String> {
-        let row = self.database.query_opt("DELETE FROM oauth_states WHERE state = $1 AND expires_at > NOW() RETURNING provider, redirect_uri, tenant_id, user_id, verifier", &[&state]).await.map_err(|e| e.to_string())?;
-        Ok(row.map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4))))
+        code: &str,
+        challenge: &str,
+        envelope: &str,
+    ) -> Result<(), String> {
+        self.database
+            .execute(
+                "DELETE FROM connection_handoffs WHERE expires_at <= NOW()",
+                &[],
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        self.database.execute("INSERT INTO connection_handoffs (code, challenge, envelope, expires_at) VALUES ($1,$2,$3,NOW() + INTERVAL '5 minutes')", &[&code, &challenge, &envelope]).await.map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Validate PKCE and consume atomically; a wrong verifier cannot burn a valid code.
+    pub async fn take_handoff(
+        &self,
+        code: &str,
+        challenge: &str,
+    ) -> Result<Option<String>, String> {
+        self.database.query_opt("DELETE FROM connection_handoffs WHERE code = $1 AND challenge = $2 AND expires_at > NOW() RETURNING envelope", &[&code, &challenge]).await.map_err(|e| e.to_string()).map(|row| row.map(|r| r.get(0)))
     }
 
     pub async fn store_connection_code(&self, code: &str, envelope: &str) -> Result<(), String> {

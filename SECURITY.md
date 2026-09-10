@@ -1,8 +1,18 @@
-# Security review: issues #6–#10
+# Connection security
 
-The catalog and tenant-session protocol can be used as a basis for an OAuth
-integration, but issues #9 and #10 must not be implemented as written until
-the following controls are part of the design.
+## Browser bootstrap and credential handoff
+
+New browser clients request a specific catalog platform at `/connect`, with a return URI, local actor id, S256 PKCE challenge and explicit credential grant. The Google session supplies the tenant identity; first-time setup does not need a pre-existing tenant secret. The consent page shows the Google identity and destination origin, with one action for the requested platform. A tenant secret is included only for the explicit `connection+tenant_secret` grant and is disclosed during consent.
+
+The complete request survives Google login inside a short-lived encrypted cookie. Consent requires a cookie-bound random CSRF token, a valid Google session and a single-use database nonce. Return URIs require HTTPS (HTTP only for loopback development), no embedded user credentials or fragment, and no pre-existing credential/error fields. The hub creates and validates its own return state and binds it to the actor, drive and platform.
+
+Provider OAuth state binds the platform, tenant, user, callback, PKCE verifier and an encrypted bootstrap context. A separate Secure/HttpOnly/SameSite=Lax browser cookie and the same Google account are required at callback for the new flow. Provider cancellation returns only a generic error to the already validated hub URI. Existing signed OAuth flows retain their prior callback format.
+
+A new callback returns only a random five-minute handoff code, never a token envelope or tenant secret. `/connect/redeem` requires the original PKCE verifier and atomically deletes the matching, unexpired handoff before issuing one rotating connection credential. Wrong verifiers do not burn a valid handoff; replays and concurrent second redemptions fail. The encrypted database payload carries platform/tenant/user identity and the exact requested grant. Revocation is checked again at redemption. Handoff codes cannot be used directly as proxy credentials. Redemption and consent responses are non-cacheable and use a no-referrer policy.
+
+The browser clears callback parameters before further use, retains pending state outside graph resources, and removes its verifier when redeeming. A lost redemption response requires reconnecting rather than blindly retrying. The existing five-minute idle expiry and one-use rotation rules still apply to proxy credentials.
+
+The legacy tenant-proof endpoints remain for compatibility. They are not used by the new hub flow. The legacy tenant-secret redirect is deprecated; new callers must request the optional grant through PKCE redemption. No existing tenant or provider secrets are rotated by this deployment.
 
 ## Tenant session
 

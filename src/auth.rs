@@ -61,7 +61,8 @@ pub async fn login(State(state): State<AppState>, jar: PrivateCookieJar) -> impl
 
 #[derive(Deserialize)]
 pub struct CallbackParams {
-    code: String,
+    code: Option<String>,
+    error: Option<String>,
     state: String,
 }
 
@@ -89,9 +90,17 @@ pub async fn callback(
         return Err(AuthError::InvalidState);
     }
 
+    if params.error.is_some() || params.code.is_none() {
+        let target = session::read_connect_redirect(&jar)
+            .and_then(|target| crate::connect::cancel_login_target(&target))
+            .unwrap_or_else(|| "/".into());
+        let jar = crate::connect::clear_consent(session::clear_connect_redirect(jar));
+        return Ok((jar, Redirect::to(&target)));
+    }
+
     let token = state
         .oauth_client
-        .exchange_code(AuthorizationCode::new(params.code))
+        .exchange_code(AuthorizationCode::new(params.code.unwrap()))
         .set_pkce_verifier(PkceCodeVerifier::new(oauth_state.pkce_verifier))
         .request_async(oauth2::reqwest::async_http_client)
         .await
@@ -122,7 +131,11 @@ pub async fn callback(
     // there instead of the home page so they can finish the handshake.
     if let Some(redirect_uri) = session::read_connect_redirect(&jar) {
         let jar = session::clear_connect_redirect(jar);
-        let target = crate::proxy::connect_url(&redirect_uri);
+        let target = if redirect_uri.starts_with("/connect?") {
+            redirect_uri
+        } else {
+            crate::proxy::connect_url(&redirect_uri)
+        };
         return Ok((jar, Redirect::to(&target)));
     }
 
@@ -160,5 +173,42 @@ impl IntoResponse for AuthError {
             ),
         };
         (status, message).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum_extra::extract::cookie::Key;
+
+    #[test]
+    fn google_cancellation_preserves_hub_state_without_forwarding_provider_error() {
+        let mut url = url::Url::parse("https://localthought.io/connect").unwrap();
+        url.query_pairs_mut().append_pair("platform", "github-issues")
+            .append_pair("redirect_uri", "https://hub.example/app/integrations?integration_state=fixture&platform=github-issues")
+            .append_pair("user_id", "actor").append_pair("code_challenge_method", "S256")
+            .append_pair("code_challenge", &crate::connect::pkce_challenge(&"a".repeat(43)).unwrap())
+            .append_pair("credentials", "connection");
+        let target =
+            crate::connect::cancel_login_target(&format!("/connect?{}", url.query().unwrap()))
+                .unwrap();
+        let target = url::Url::parse(&target).unwrap();
+        let pairs: std::collections::HashMap<_, _> = target.query_pairs().into_owned().collect();
+        assert_eq!(pairs["integration_state"], "fixture");
+        assert_eq!(pairs["platform"], "github-issues");
+        assert_eq!(pairs["error"], "access_denied");
+        assert!(crate::connect::cancel_login_target("https://evil.example").is_none());
+        assert!(
+            crate::connect::cancel_login_target("/connect?redirect_uri=https://evil.example")
+                .is_none()
+        );
+        let jar = session::set_oauth_state(
+            PrivateCookieJar::new(Key::generate()),
+            &OAuthState {
+                csrf_token: "csrf".into(),
+                pkce_verifier: "verifier".into(),
+            },
+        );
+        assert!(session::read_oauth_state(&session::clear_oauth_state(jar)).is_none());
     }
 }

@@ -26,14 +26,11 @@ Authorization Code flow with PKCE.
 - `GET /catalog` — lists the available integration platform names.
 - `GET /catalog/{platform}.yaml` — returns the OpenAPI document for that
   platform with its configured overlays applied.
-- `GET /connect?redirect_uri=<url>` — a third party (e.g. atomic-server)
-  sends the user here to obtain their tenant secret. If the user isn't signed
-  in yet, they're sent to log in first and brought back here afterwards.
-  Once signed in, they see a consent screen showing `redirect_uri` and an
-  "OK" button.
-- `POST /connect` — submitted by the consent screen's form. Redirects the
-  browser to `redirect_uri` with the tenant's secret attached as
-  `?secret=...`.
+- `GET /connect?platform=github-issues&redirect_uri=<url>&user_id=<actor>&code_challenge=<S256>&code_challenge_method=S256&credentials=connection` — starts a browser connection without a tenant secret. The page shows **Log in with Google**, or the signed-in Google identity and one action: **Use LocalThought to sync GitHub with your Atomic Data Hub**. The selected platform, return URL and PKCE challenge survive Google login.
+- `POST /connect/authorize` — approves the selected platform with a short-lived, cookie-bound CSRF token and starts provider OAuth. The authenticated Google account determines the tenant; the caller supplies its local user/agent identifier. The consent page shows the destination hub origin.
+- `POST /connect/redeem` — exchanges `{ "code": "<callback connection_code>", "code_verifier": "<original verifier>" }` for `{ "connection_code": "<rotating proxy credential>", "platform": "github-issues" }`. The handoff expires after five minutes, requires S256 PKCE, and is consumed atomically. Wrong verifiers do not consume a legitimate handoff. Responses have `Cache-Control: no-store`; browser requests omit cookies.
+- Clients that also need the tenant credential explicitly request `credentials=connection+tenant_secret` (URL-encode the `+` as `%2B`). The consent page discloses this extra grant; redemption additionally returns `tenant_secret`. The browser-only Atomic Data Hub requests just `connection` and never needs to paste, receive, or store a tenant secret.
+- The legacy signed `/connect` and `/oauth/{platform}/start` protocol remains available for existing clients. New clients should use the bootstrap flow above; it does not require the circular prerequisite of an already provisioned tenant secret.
 - `/proxy` — called by the third party with `Authorization: Bearer
   <secret>`. Returns `{"ok": true}` if the tenant secret verifies, or `401` with
   an error body otherwise. Verification is a pure function of
@@ -43,13 +40,9 @@ Authorization Code flow with PKCE.
   supplies that response, a tenant-vouched `user_id`, and its signature when
   opening `/connect`. The proof expires after ten minutes.
 
-Once signed in, the home page also displays a **tenant secret**: a value
-deterministically derived from the tenant identity and the
-server's `SERVER_SECRET`. It's meant to be copied into the environment of
-another service (e.g. an atomic-server instance running the
-`feat/api-plugins` branch) so that service can later authenticate requests
-made on the user's behalf. Because it's derived rather than stored, the
-server never needs a database to look it up or validate it.
+The signed-in home page displays the Google identity, without displaying credentials. Tenant secrets are deterministic HMAC credentials derived from the stable Google subject and `SERVER_SECRET`; existing credentials remain valid. Provider access/refresh tokens are encrypted at rest and never returned to the hub. The hub receives a rotating opaque proxy credential through the protected exchange.
+
+The new consent, provider-state binding and one-time handoff work alongside the existing OAuth and proxy routes. The database migration adds a nullable OAuth context column and a `connection_handoffs` table without invalidating existing connection codes. Google/provider OAuth app registrations and callback URLs do not change.
 
 All cookies are set with `axum-extra`'s `PrivateCookieJar`, which
 encrypts and authenticates their contents, so the server never needs to
@@ -198,3 +191,17 @@ tokens; the proxy stores and refreshes these through its existing credential flo
 Legacy non-expiring access tokens are also supported. No provider writes are exposed.
 
 Provider documentation: https://developer.todoist.com/api/v1/
+
+## Redirect-flow regression checks
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+# Isolated local PostgreSQL, never a production database:
+TEST_DATABASE_URL='postgres://postgres@localhost:15439/connect_test?sslmode=disable' \
+OAUTH_GITHUB_ISSUES_CLIENT_ID=fixture-client OAUTH_GITHUB_ISSUES_CLIENT_SECRET=fixture-secret \
+  cargo test -- --include-ignored
+```
+
+CI provides PostgreSQL and includes the database tests. Coverage includes selected-platform rendering and escaping, credential-free sign-in, return-address validation, PKCE, consent/session requirements, handoff expiry, wrong-verifier refusal, concurrent/replayed redemption, optional tenant-secret grants, revocation and provider-cookie/account binding. Live Google/GitHub authorization and a hub read-only import must be verified against both matching deployed revisions; local fixture checks do not establish live access.
