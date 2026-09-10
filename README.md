@@ -175,3 +175,15 @@ OPTIONS preflights. Responses expose `X-Connection-Code`, `Link`, `Retry-After`,
 before continuing pagination and must never replay a consumed code after an
 uncertain response. Cookie credentials are not enabled for CORS; provider
 login and consent remain top-level browser navigations.
+
+## Todoist
+
+The `todoist` platform imports projects and active tasks through Todoist API v1
+with the read-only `data:read` scope. Configure `OAUTH_TODOIST_CLIENT_ID` and
+`OAUTH_TODOIST_CLIENT_SECRET`, and register
+`https://localthought.io/oauth/todoist/callback` as the OAuth redirect URL.
+New Todoist applications issue expiring access tokens and rotating refresh
+tokens; the proxy stores and refreshes these through its existing credential flow.
+Legacy non-expiring access tokens are also supported. No provider writes are exposed.
+
+Provider documentation: https://developer.todoist.com/api/v1/

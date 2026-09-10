@@ -20,3 +20,9 @@ platforms:
       - https://raw.githubusercontent.com/localthought/overlays/e00543f9031e5b0dea0f4b130787a7289f1602fb/moneybird.com/api/v2/auth-overlay.yaml
       - https://raw.githubusercontent.com/localthought/overlays/e00543f9031e5b0dea0f4b130787a7289f1602fb/moneybird.com/api/v2/pagination-overlay.yaml
       - https://raw.githubusercontent.com/localthought/overlays/e00543f9031e5b0dea0f4b130787a7289f1602fb/moneybird.com/api/v2/crud-causality-overlay.yaml
+  - name: todoist
+    openapi: https://raw.githubusercontent.com/localthought/openapi-directory/ac07532b0a0ac101cf8bae2a54177fb1d8ea3779/APIs/todoist.com/1/openapi.yaml
+    overlays:
+      - https://raw.githubusercontent.com/localthought/overlays/a53c7e859433678d662d7b95a02c7ac29b553928/todoist.com/api/v1/auth-overlay.yaml
+      - https://raw.githubusercontent.com/localthought/overlays/a53c7e859433678d662d7b95a02c7ac29b553928/todoist.com/api/v1/pagination-overlay.yaml
+      - https://raw.githubusercontent.com/localthought/overlays/a53c7e859433678d662d7b95a02c7ac29b553928/todoist.com/api/v1/crud-causality-overlay.yaml
