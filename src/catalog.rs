@@ -330,6 +330,24 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "downloads pinned OAuth authentication-details metadata"]
+    async fn pinned_catalog_selects_google_offline_and_spotify_pkce_profiles() {
+        let catalog = Catalog::load(
+            "https://raw.githubusercontent.com/localthought/overlays/74f31ba8ec2659e9452092b730c31865b6a86fdc/catalog.json",
+            &crate::build_http_client(),
+        )
+        .await
+        .unwrap();
+        let google = catalog.oauth_provider("google-calendar").unwrap();
+        assert!(google.use_pkce);
+        assert!(google
+            .authorization_params
+            .contains(&("access_type".into(), "offline".into())));
+        let spotify = catalog.oauth_provider("spotify").unwrap();
+        assert!(spotify.use_pkce);
+    }
+
+    #[tokio::test]
     #[ignore = "downloads the pinned production catalog sources"]
     async fn pinned_todoist_catalog_is_read_only_and_preserves_api_prefix() {
         let catalog = Catalog::load("https://raw.githubusercontent.com/localthought/overlays/a53b5e75641dabc04af18813348312edcd453bf9/catalog.json", &crate::build_http_client())
