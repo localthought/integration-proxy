@@ -130,11 +130,15 @@ impl Catalog {
     pub fn oauth_provider(&self, platform: &str) -> Result<crate::providers::Provider, String> {
         let source = self.get(platform).ok_or("unknown catalog platform")?;
         let document = serde_yaml::from_str(source).map_err(|_| "invalid catalog document")?;
-        let scheme = self
+        let scheme = match self
             .selections
             .get(platform)
             .and_then(|selection| selection.get("oauthSecurityScheme"))
-            .and_then(Value::as_str);
+        {
+            Some(Value::String(scheme)) => Some(scheme.as_str()),
+            Some(_) => return Err("oauthSecurityScheme selection must be a string".into()),
+            None => None,
+        };
         crate::providers::Provider::from_document(&document, scheme)
     }
     fn get(&self, platform: &str) -> Option<&str> {
@@ -693,6 +697,19 @@ mod tests {
             "fixture"
         )
         .is_err());
+    }
+
+    #[test]
+    fn oauth_scheme_selection_rejects_non_string_values() {
+        let mut catalog = Catalog::for_test("fixture");
+        catalog.selections.insert(
+            "fixture".into(),
+            serde_json::json!({"oauthSecurityScheme": null}),
+        );
+        assert_eq!(
+            catalog.oauth_provider("fixture").unwrap_err(),
+            "oauthSecurityScheme selection must be a string"
+        );
     }
 
     #[tokio::test]

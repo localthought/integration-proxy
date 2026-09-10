@@ -158,7 +158,7 @@ mod tests {
     use super::*;
 
     fn document(requirement: &str) -> serde_json::Value {
-        serde_json::json!({
+        let mut document = serde_json::json!({
             "components": {
                 "parameters": {"accessType": {
                     "name": "access_type", "in": "query",
@@ -168,8 +168,7 @@ mod tests {
                     "type": "oauth2",
                     "x-oauth-authentication-details": {
                         "authorizationServerMetadata": {
-                            "code_challenge_methods_supported":
-                                if requirement == "unsupported" { serde_json::json!(null) } else { serde_json::json!(["S256"]) }
+                            "code_challenge_methods_supported": ["S256"]
                         },
                         "authorizationCode": {
                             "pkce": {"requirement": requirement},
@@ -188,7 +187,15 @@ mod tests {
             },
             "security": [{"auth": ["read"]}],
             "paths": {}
-        })
+        });
+        if requirement == "unsupported" {
+            document["components"]["securitySchemes"]["auth"]["x-oauth-authentication-details"]
+                ["authorizationServerMetadata"]
+                .as_object_mut()
+                .unwrap()
+                .remove("code_challenge_methods_supported");
+        }
+        document
     }
 
     #[test]
