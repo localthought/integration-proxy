@@ -57,6 +57,12 @@ pub fn known(name: &str) -> Option<Provider> {
             // Moneybird has no contacts-only scope; sales_invoices grants contacts access.
             scopes: &["sales_invoices"],
         }),
+        "todoist" => Some(Provider {
+            name: "todoist",
+            authorization_url: "https://app.todoist.com/oauth/authorize",
+            token_url: "https://api.todoist.com/oauth/access_token",
+            scopes: &["data:read"],
+        }),
         _ => None,
     }
 }
@@ -64,6 +70,24 @@ pub fn known(name: &str) -> Option<Provider> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn todoist_uses_read_only_scope_and_official_oauth_endpoints() {
+        let provider = known("todoist").expect("Todoist must be supported");
+        assert_eq!(
+            provider.authorization_url,
+            "https://app.todoist.com/oauth/authorize"
+        );
+        assert_eq!(
+            provider.token_url,
+            "https://api.todoist.com/oauth/access_token"
+        );
+        assert_eq!(provider.scopes, ["data:read"]);
+        assert_eq!(
+            Config::provider_env_prefix(provider.name).unwrap(),
+            "OAUTH_TODOIST"
+        );
+    }
+
     #[test]
     fn moneybird_uses_contacts_scope_and_official_oauth_endpoints() {
         let provider = known("moneybird").expect("Moneybird must be supported");

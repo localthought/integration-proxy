@@ -241,6 +241,44 @@ pub async fn document(Path(file): Path<String>, State(state): State<AppState>) -
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    #[ignore = "downloads the pinned production catalog sources"]
+    async fn pinned_todoist_catalog_is_read_only_and_preserves_api_prefix() {
+        let catalog = Catalog::load("catalog.yaml", &crate::build_http_client())
+            .await
+            .unwrap();
+        let document: Value = serde_yaml::from_str(catalog.get("todoist").unwrap()).unwrap();
+        let resources = document
+            .pointer("/components/crudResources")
+            .unwrap()
+            .as_object()
+            .unwrap();
+        assert_eq!(resources.len(), 2);
+        for resource in resources.values() {
+            let reference = resource.pointer("/schema/$ref").unwrap().as_str().unwrap();
+            assert!(document
+                .pointer(reference.strip_prefix('#').unwrap())
+                .is_some());
+        }
+        for path in [
+            "/api/v1/projects",
+            "/api/v1/tasks",
+            "/api/v1/projects/example",
+            "/api/v1/tasks/example",
+        ] {
+            assert_eq!(
+                catalog.allows("todoist", "GET", path).unwrap().as_str(),
+                "https://api.todoist.com/api/v1"
+            );
+            for method in ["POST", "PUT", "PATCH", "DELETE"] {
+                assert!(catalog.allows("todoist", method, path).is_none());
+            }
+        }
+        for path in ["/tasks", "/api/v10/tasks", "/api/v1/access_tokens"] {
+            assert!(catalog.allows("todoist", "GET", path).is_none());
+        }
+    }
+
     #[test]
     fn matches_moneybird_parameterized_contact_paths() {
         let template = "/{administration_id}/contacts/{id}.json";
