@@ -17,8 +17,8 @@ use crate::{
 };
 
 pub fn build_client(config: &Config) -> Result<BasicClient, String> {
-    let auth_url = AuthUrl::new(config.app_auth_authorization_url.clone())
-        .map_err(|e| e.to_string())?;
+    let auth_url =
+        AuthUrl::new(config.app_auth_authorization_url.clone()).map_err(|e| e.to_string())?;
     let token_url = TokenUrl::new(config.app_auth_token_url.clone()).map_err(|e| e.to_string())?;
     let redirect_url = RedirectUrl::new(config.redirect_url()).map_err(|e| e.to_string())?;
 
@@ -205,7 +205,10 @@ mod tests {
             .url();
         assert_eq!(url.host_str(), Some("issuer.example"));
         assert_eq!(url.path(), "/authorize");
-        assert_eq!(url.query_pairs().find(|(k, _)| k == "client_id").unwrap().1, "client");
+        assert_eq!(
+            url.query_pairs().find(|(k, _)| k == "client_id").unwrap().1,
+            "client"
+        );
     }
 
     #[test]

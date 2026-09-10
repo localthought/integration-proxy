@@ -515,7 +515,7 @@ mod tests {
             let policy = response.headers()["content-security-policy"]
                 .to_str()
                 .unwrap();
-            assert!(policy.contains("form-action 'self' https://github.com https://hub.example"));
+            assert!(policy.contains("form-action 'self' https://auth.example https://hub.example"));
             assert!(!policy.contains("spotify"));
             assert_eq!(response.headers()[header::REFERRER_POLICY], "same-origin");
         }
@@ -839,7 +839,7 @@ mod tests {
         );
         let destination =
             Url::parse(response.headers()[header::LOCATION].to_str().unwrap()).unwrap();
-        assert_eq!(destination.host_str(), Some("github.com"));
+        assert_eq!(destination.host_str(), Some("auth.example"));
         let provider_state = destination
             .query_pairs()
             .find(|(k, _)| k == "state")

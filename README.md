@@ -224,3 +224,11 @@ OAUTH_GITHUB_ISSUES_CLIENT_ID=fixture-client OAUTH_GITHUB_ISSUES_CLIENT_SECRET=f
 ```
 
 CI provides PostgreSQL and includes the database tests. Coverage includes concurrent cold-start schema initialization, selected-platform rendering and escaping, credential-free sign-in, return-address validation, PKCE, consent/session requirements, handoff expiry, wrong-verifier refusal, concurrent/replayed redemption, optional tenant-secret grants, revocation and provider-cookie/account binding. Live Google/GitHub authorization and a hub read-only import must be verified against both matching deployed revisions; local fixture checks do not establish live access.
+
+### OAuth client registration
+
+Integration authorization and token endpoints and required scopes are read from the composed OpenAPI catalog. A platform must have exactly one OAuth authorization-code security scheme. Scopes are taken from operation security requirements (falling back to root requirements), not every scope supported by the server. Public operations require no scopes; unsupported authentication combinations fail closed.
+
+`OAUTH_<PLATFORM>_CLIENT_AUTH_METHOD` selects the method registered for this client: `none`, `client_secret_post` (default), or `client_secret_basic`. Public clients use `none` and do not load or send a secret. Confidential clients require the corresponding `_CLIENT_SECRET`. This setting describes the client registration, not server-supported capabilities. Authorization uses S256 PKCE. Server capability extensions remain subject to the separate OpenAPI extension discussions.
+
+When upgrading the previous deployment, copy its application-login client ID/secret to `APP_AUTH_CLIENT_ID` / `APP_AUTH_CLIENT_SECRET` and configure the same authorization, token, and userinfo endpoints before deploying. Keep the identity issuer stable: tenant identities are derived from its subject identifiers. Set the existing public PKCE client's `_CLIENT_AUTH_METHOD=none`. Existing credential envelopes, handoffs, callbacks, and provider credential variable names remain valid. Browser login sessions created by the earlier session schema require sign-in again.

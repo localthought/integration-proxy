@@ -44,7 +44,12 @@ impl Catalog {
     #[cfg(test)]
     pub(crate) fn for_test(platform: &str) -> Self {
         Self {
-            documents: [(platform.into(), "{}".into())].into(),
+            documents: [(platform.into(), serde_json::json!({
+                "components": {"securitySchemes": {"fixture": {"type": "oauth2", "flows": {
+                    "authorizationCode": {"authorizationUrl": "https://auth.example/authorize",
+                    "tokenUrl": "https://auth.example/token", "scopes": {"read": "Read records"}}
+                }}}}, "security": [{"fixture": ["read"]}], "paths": {"/records": {"get": {}}}
+            }).to_string())].into(),
         }
     }
 
@@ -273,8 +278,31 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "downloads the pinned production catalog sources"]
+    async fn pinned_catalog_supplies_oauth_and_canonical_pagination_paths() {
+        let catalog = Catalog::load("https://raw.githubusercontent.com/localthought/overlays/a53b5e75641dabc04af18813348312edcd453bf9/catalog.json", &crate::build_http_client()).await.unwrap();
+        for name in catalog.names() {
+            let provider = catalog.oauth_provider(&name).unwrap();
+            assert!(!provider.scopes.is_empty(), "{name}");
+        }
+        assert!(catalog
+            .allows("github-issues", "GET", "/repositories/123/issues")
+            .is_some());
+        assert!(catalog
+            .allows(
+                "github-issues",
+                "GET",
+                "/repositories/123/issues/1/comments"
+            )
+            .is_some());
+        assert!(catalog
+            .allows("github-issues", "POST", "/repositories/123/issues")
+            .is_none());
+    }
+
+    #[tokio::test]
+    #[ignore = "downloads the pinned production catalog sources"]
     async fn pinned_todoist_catalog_is_read_only_and_preserves_api_prefix() {
-        let catalog = Catalog::load("https://raw.githubusercontent.com/localthought/overlays/46372f131bed8de8efec9519bb3527d737c74ee9/catalog.json", &crate::build_http_client())
+        let catalog = Catalog::load("https://raw.githubusercontent.com/localthought/overlays/a53b5e75641dabc04af18813348312edcd453bf9/catalog.json", &crate::build_http_client())
             .await
             .unwrap();
         let document: Value = serde_yaml::from_str(catalog.get("todoist").unwrap()).unwrap();
@@ -312,7 +340,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "downloads the pinned production catalog sources"]
     async fn pinned_discord_catalog_composes_and_allows_only_user_reads() {
-        let catalog = Catalog::load("https://raw.githubusercontent.com/localthought/overlays/46372f131bed8de8efec9519bb3527d737c74ee9/catalog.json", &crate::build_http_client())
+        let catalog = Catalog::load("https://raw.githubusercontent.com/localthought/overlays/a53b5e75641dabc04af18813348312edcd453bf9/catalog.json", &crate::build_http_client())
             .await
             .unwrap();
         let document: Value = serde_yaml::from_str(catalog.get("discord").unwrap()).unwrap();
@@ -376,7 +404,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "downloads the pinned production catalog sources"]
     async fn pinned_moneybird_catalog_composes_and_allows_contacts() {
-        let catalog = Catalog::load("https://raw.githubusercontent.com/localthought/overlays/46372f131bed8de8efec9519bb3527d737c74ee9/catalog.json", &crate::build_http_client())
+        let catalog = Catalog::load("https://raw.githubusercontent.com/localthought/overlays/a53b5e75641dabc04af18813348312edcd453bf9/catalog.json", &crate::build_http_client())
             .await
             .unwrap();
         assert!(catalog.names().contains(&"moneybird".to_string()));
@@ -412,7 +440,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "downloads the pinned production catalog sources"]
     async fn pinned_spotify_catalog_composes_and_allows_readonly_playlists() {
-        let catalog = Catalog::load("https://raw.githubusercontent.com/localthought/overlays/46372f131bed8de8efec9519bb3527d737c74ee9/catalog.json", &crate::build_http_client())
+        let catalog = Catalog::load("https://raw.githubusercontent.com/localthought/overlays/a53b5e75641dabc04af18813348312edcd453bf9/catalog.json", &crate::build_http_client())
             .await
             .unwrap();
         let document: Value = serde_yaml::from_str(catalog.get("spotify").unwrap()).unwrap();

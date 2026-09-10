@@ -54,7 +54,7 @@ impl Config {
         let server_secret =
             env::var("SERVER_SECRET").map_err(|_| "SERVER_SECRET must be set".to_string())?;
         let catalog_path = env::var("CATALOG_PATH").unwrap_or_else(|_| {
-            "https://raw.githubusercontent.com/localthought/overlays/46372f131bed8de8efec9519bb3527d737c74ee9/catalog.json".to_string()
+            "https://raw.githubusercontent.com/localthought/overlays/a53b5e75641dabc04af18813348312edcd453bf9/catalog.json".to_string()
         });
         let database_url = env::var("DATABASE_URL")
             .map_err(|_| "DATABASE_URL must be set for replay protection".to_string())?;
