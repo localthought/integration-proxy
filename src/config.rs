@@ -4,8 +4,12 @@ use std::env;
 /// server itself stays stateless and container-friendly.
 #[derive(Clone)]
 pub struct Config {
-    pub google_client_id: String,
-    pub google_client_secret: String,
+    pub app_auth_client_id: String,
+    pub app_auth_client_secret: String,
+    pub app_auth_authorization_url: String,
+    pub app_auth_token_url: String,
+    pub app_auth_userinfo_url: String,
+    pub app_auth_label: String,
     /// Public URL the server is reachable at, used to build the OAuth
     /// redirect URL (e.g. `https://auth.example.com`).
     pub base_url: String,
@@ -30,10 +34,17 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self, String> {
-        let google_client_id =
-            env::var("GOOGLE_CLIENT_ID").map_err(|_| "GOOGLE_CLIENT_ID must be set".to_string())?;
-        let google_client_secret = env::var("GOOGLE_CLIENT_SECRET")
-            .map_err(|_| "GOOGLE_CLIENT_SECRET must be set".to_string())?;
+        let app_auth_client_id = env::var("APP_AUTH_CLIENT_ID")
+            .map_err(|_| "APP_AUTH_CLIENT_ID must be set".to_string())?;
+        let app_auth_client_secret = env::var("APP_AUTH_CLIENT_SECRET")
+            .map_err(|_| "APP_AUTH_CLIENT_SECRET must be set".to_string())?;
+        let app_auth_authorization_url = env::var("APP_AUTH_AUTHORIZATION_URL")
+            .map_err(|_| "APP_AUTH_AUTHORIZATION_URL must be set".to_string())?;
+        let app_auth_token_url = env::var("APP_AUTH_TOKEN_URL")
+            .map_err(|_| "APP_AUTH_TOKEN_URL must be set".to_string())?;
+        let app_auth_userinfo_url = env::var("APP_AUTH_USERINFO_URL")
+            .map_err(|_| "APP_AUTH_USERINFO_URL must be set".to_string())?;
+        let app_auth_label = env::var("APP_AUTH_LABEL").unwrap_or_else(|_| "OIDC".to_string());
         let base_url = env::var("BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
         let port = env::var("PORT")
             .ok()
@@ -57,8 +68,12 @@ impl Config {
             .collect();
 
         Ok(Self {
-            google_client_id,
-            google_client_secret,
+            app_auth_client_id,
+            app_auth_client_secret,
+            app_auth_authorization_url,
+            app_auth_token_url,
+            app_auth_userinfo_url,
+            app_auth_label,
             base_url,
             port,
             session_secret,

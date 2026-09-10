@@ -1,7 +1,7 @@
 # integration-proxy
 
-A stateless Rust web server that lets a user log in with their Google
-account. Sign-in sets an encrypted session cookie; there is a logout button
+A stateless Rust web server that lets a user log in with a configured OIDC
+provider. Sign-in sets an encrypted session cookie; there is a logout button
 to clear it. No database, no server-side session store — the cookie *is*
 the session, so any number of instances can run behind a load balancer with
 no shared state.
@@ -12,13 +12,13 @@ Authorization Code flow with PKCE.
 
 ## How it works
 
-- `GET /` — shows a "Log in with Google" button, or, if a valid session
+- `GET /` — shows a configurable application-login button, or, if a valid session
   cookie is present, the signed-in user's name/picture and a "Log out"
   button.
-- `GET /auth/login` — starts the OAuth flow: generates a PKCE challenge and
+- `GET /auth/login` — starts the configured OIDC OAuth flow: generates a PKCE challenge and
   CSRF token, stores them in a short-lived encrypted cookie, and redirects
-  to Google's consent screen.
-- `GET /auth/callback` — Google redirects here with an authorization code.
+  to the provider's consent screen.
+- `GET /auth/callback` — the configured provider redirects here with an authorization code.
   The server validates the CSRF token, exchanges the code for an access
   token, fetches the user's profile from Google's userinfo endpoint, and
   sets the session cookie.
@@ -26,8 +26,8 @@ Authorization Code flow with PKCE.
 - `GET /catalog` — lists the available integration platform names.
 - `GET /catalog/{platform}.yaml` — returns the OpenAPI document for that
   platform with its configured overlays applied.
-- `GET /connect?platform=github-issues&redirect_uri=<url>&user_id=<actor>&code_challenge=<S256>&code_challenge_method=S256&credentials=connection` — starts a browser connection without a tenant secret. The page shows **Log in with Google**, or the signed-in Google identity and one action: **Use LocalThought to sync GitHub with your Atomic Data Hub**. The selected platform, return URL and PKCE challenge survive Google login.
-- `POST /connect/authorize` — approves the selected platform with a short-lived, cookie-bound CSRF token and starts provider OAuth. The authenticated Google account determines the tenant; the caller supplies its local user/agent identifier. The consent page shows the destination hub origin and uses `Referrer-Policy: same-origin`, so its form submission retains a concrete origin without sending a referrer to the external OAuth provider.
+- `GET /connect?platform=github-issues&redirect_uri=<url>&user_id=<actor>&code_challenge=<S256>&code_challenge_method=S256&credentials=connection` — starts a browser connection without a tenant secret. The page shows the configured application-login action, or the signed-in application identity and one action: **Use LocalThought to sync GitHub with your Atomic Data Hub**. The selected platform, return URL and PKCE challenge survive application login.
+- `POST /connect/authorize` — approves the selected platform with a short-lived, cookie-bound CSRF token and starts provider OAuth. The authenticated application account determines the tenant; the caller supplies its local user/agent identifier. The consent page shows the destination hub origin and uses `Referrer-Policy: same-origin`, so its form submission retains a concrete origin without sending a referrer to the external OAuth provider.
 - `POST /connect/redeem` — exchanges `{ "code": "<callback connection_code>", "code_verifier": "<original verifier>" }` for `{ "connection_code": "<rotating proxy credential>", "platform": "github-issues" }`. The handoff expires after five minutes, requires S256 PKCE, and is consumed atomically. Wrong verifiers do not consume a legitimate handoff. Responses have `Cache-Control: no-store`; browser requests omit cookies.
 - Clients that also need the tenant credential explicitly request `credentials=connection+tenant_secret` (URL-encode the `+` as `%2B`). The consent page discloses this extra grant; redemption additionally returns `tenant_secret`. The browser-only Atomic Data Hub requests just `connection` and never needs to paste, receive, or store a tenant secret.
 - The legacy signed `/connect` and `/oauth/{platform}/start` protocol remains available for existing clients. New clients should use the bootstrap flow above; it does not require the circular prerequisite of an already provisioned tenant secret.
@@ -40,7 +40,7 @@ Authorization Code flow with PKCE.
   supplies that response, a tenant-vouched `user_id`, and its signature when
   opening `/connect`. The proof expires after ten minutes.
 
-The signed-in home page displays the Google identity, without displaying credentials. Tenant secrets are deterministic HMAC credentials derived from the stable Google subject and `SERVER_SECRET`; existing credentials remain valid. Provider access/refresh tokens are encrypted at rest and never returned to the hub. The hub receives a rotating opaque proxy credential through the protected exchange.
+The signed-in home page displays the OIDC identity, without displaying credentials. Tenant secrets are deterministic HMAC credentials derived from the stable OIDC subject and `SERVER_SECRET`; existing credentials remain valid. Provider access/refresh tokens are encrypted at rest and never returned to the hub. The hub receives a rotating opaque proxy credential through the protected exchange.
 
 The new consent, provider-state binding and one-time handoff work alongside the existing OAuth and proxy routes. The database migration adds a nullable OAuth context column and a `connection_handoffs` table without invalidating existing connection codes. Schema initialization runs in a transaction under a PostgreSQL advisory lock, so simultaneous app instances can safely start against an empty database. Google/provider OAuth app registrations and callback URLs do not change.
 
@@ -50,13 +50,9 @@ persist anything to recognize a returning user.
 
 ## Setup
 
-### 1. Create Google OAuth credentials
+### 1. Configure application-login OIDC credentials
 
-1. Go to the [Google Cloud Console credentials page](https://console.cloud.google.com/apis/credentials).
-2. Create an **OAuth client ID** of type **Web application**.
-3. Add an authorized redirect URI: `<BASE_URL>/auth/callback` (e.g.
-   `http://localhost:8080/auth/callback` for local development).
-4. Note the generated **Client ID** and **Client Secret**.
+Configure an OIDC authorization-code client and register `<BASE_URL>/auth/callback` as its redirect URI. Supply its client credentials and authorization, token, and userinfo endpoint URLs through the `APP_AUTH_*` variables below. Application login requests the standard `openid`, `email`, and `profile` scopes.
 
 ### 2. Configure environment variables
 
@@ -65,9 +61,13 @@ directly):
 
 | Variable               | Required | Description                                                                 |
 | ----------------------| -------- | ---------------------------------------------------------------------------- |
-| `GOOGLE_CLIENT_ID`     | yes      | OAuth client ID from the Google Cloud Console.                              |
-| `GOOGLE_CLIENT_SECRET` | yes      | OAuth client secret from the Google Cloud Console.                          |
-| `BASE_URL`             | no       | Public URL of the server, no trailing slash. Defaults to `http://localhost:8080`. Must match the redirect URI registered with Google. |
+| `APP_AUTH_CLIENT_ID`     | yes      | OIDC application-login client ID. |
+| `APP_AUTH_CLIENT_SECRET` | yes      | OIDC application-login client secret. |
+| `APP_AUTH_AUTHORIZATION_URL` | yes | OIDC authorization endpoint. |
+| `APP_AUTH_TOKEN_URL` | yes | OIDC token endpoint. |
+| `APP_AUTH_USERINFO_URL` | yes | OIDC userinfo endpoint. |
+| `APP_AUTH_LABEL` | no | Login provider label shown in the UI. Defaults to `OIDC`. |
+| `BASE_URL`             | no       | Public URL of the server, no trailing slash. Defaults to `http://localhost:8080`. Must match the redirect URI registered with the application-login provider. |
 | `PORT`                 | no       | Port to listen on. Defaults to `8080`.                                      |
 | `SESSION_SECRET`       | no       | Secret used to encrypt session cookies. If unset, a random key is generated at startup and sessions are invalidated whenever the process restarts. Set this to a persistent random value in production. |
 | `SERVER_SECRET`        | yes      | Secret used to deterministically derive each tenant's secret (see above). Must stay constant across restarts and instances. |

@@ -28,6 +28,8 @@ use config::Config;
 #[derive(Clone)]
 struct AppState {
     oauth_client: BasicClient,
+    app_auth_userinfo_url: String,
+    app_auth_label: String,
     http_client: reqwest::Client,
     key: Key,
     server_secret: String,
@@ -103,6 +105,8 @@ async fn main() {
     let base_url = config.base_url.clone();
     let state = AppState {
         oauth_client,
+        app_auth_userinfo_url: config.app_auth_userinfo_url.clone(),
+        app_auth_label: config.app_auth_label.clone(),
         http_client,
         key,
         server_secret,
@@ -188,10 +192,11 @@ async fn home(State(state): State<AppState>, jar: PrivateCookieJar) -> Html<Stri
     let user = session::read_session(&jar);
     let tenant_secret = user
         .as_ref()
-        .map(|u| tenant_secret::derive(&state.server_secret, &u.google_sub));
+        .map(|u| tenant_secret::derive(&state.server_secret, &u.subject));
     Html(templates::render_home(
         user.as_ref(),
         tenant_secret.as_deref(),
+        &state.app_auth_label,
     ))
 }
 

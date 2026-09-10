@@ -196,7 +196,7 @@ pub async fn connect_confirm(
     }
     let user = session::read_session(&jar).ok_or(ConnectError::NotLoggedIn)?;
 
-    let secret = tenant_secret::derive(&state.server_secret, &user.google_sub);
+    let secret = tenant_secret::derive(&state.server_secret, &user.subject);
     redirect_uri
         .query_pairs_mut()
         .append_pair("secret", &secret);
@@ -544,8 +544,12 @@ mod tests {
 
     fn test_state(server_secret: &str) -> AppState {
         let config = crate::config::Config {
-            google_client_id: "test-client-id".to_string(),
-            google_client_secret: "test-client-secret".to_string(),
+            app_auth_client_id: "test-client-id".to_string(),
+            app_auth_client_secret: "test-client-secret".to_string(),
+            app_auth_authorization_url: "https://accounts.example/authorize".to_string(),
+            app_auth_token_url: "https://accounts.example/token".to_string(),
+            app_auth_userinfo_url: "https://accounts.example/userinfo".to_string(),
+            app_auth_label: "OIDC".to_string(),
             base_url: "http://localhost:8080".to_string(),
             port: 8080,
             session_secret: None,
@@ -557,6 +561,8 @@ mod tests {
         };
         AppState {
             oauth_client: crate::auth::build_client(&config).unwrap(),
+            app_auth_userinfo_url: config.app_auth_userinfo_url.clone(),
+            app_auth_label: config.app_auth_label.clone(),
             http_client: crate::build_http_client(),
             key: Key::generate(),
             server_secret: config.server_secret,
@@ -737,7 +743,7 @@ mod tests {
 
     fn logged_in_jar(key: Key) -> (PrivateCookieJar, crate::session::SessionUser) {
         let user = crate::session::SessionUser::new(
-            "google-sub-123".to_string(),
+            "oidc-sub-123".to_string(),
             "user@example.com".to_string(),
             "Test User".to_string(),
             None,
@@ -848,7 +854,7 @@ mod tests {
         let key = Key::generate();
         let (jar, user) = logged_in_jar(key);
         let state = test_state("server-secret");
-        let expected_secret = tenant_secret::derive(&state.server_secret, &user.google_sub);
+        let expected_secret = tenant_secret::derive(&state.server_secret, &user.subject);
 
         let redirect = connect_confirm(
             State(state),
@@ -894,7 +900,7 @@ mod tests {
     #[tokio::test]
     async fn proxy_accepts_a_valid_bearer_secret() {
         let state = test_state("server-secret");
-        let secret = tenant_secret::derive(&state.server_secret, "google-sub-123");
+        let secret = tenant_secret::derive(&state.server_secret, "oidc-sub-123");
 
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -926,7 +932,7 @@ mod tests {
     #[tokio::test]
     async fn proxy_rejects_a_secret_signed_with_a_different_server_secret() {
         let state = test_state("server-secret");
-        let secret = tenant_secret::derive("a-different-secret", "google-sub-123");
+        let secret = tenant_secret::derive("a-different-secret", "oidc-sub-123");
 
         let mut headers = HeaderMap::new();
         headers.insert(

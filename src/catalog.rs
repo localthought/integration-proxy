@@ -504,6 +504,8 @@ mod tests {
                 oauth2::AuthUrl::new("https://example.com/auth".into()).unwrap(),
                 None,
             ),
+            app_auth_userinfo_url: "https://accounts.example/userinfo".into(),
+            app_auth_label: "OIDC".into(),
             http_client: crate::build_http_client(),
             key: axum_extra::extract::cookie::Key::generate(),
             server_secret: "test".into(),

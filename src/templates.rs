@@ -3,13 +3,18 @@ use crate::session::SessionUser;
 /// Minimal, dependency-free HTML rendering. The GUI is intentionally tiny:
 /// a login button when signed out, and the user's identity plus a logout
 /// button when signed in.
-pub fn render_home(user: Option<&SessionUser>, _tenant_secret: Option<&str>) -> String {
+pub fn render_home(
+    user: Option<&SessionUser>,
+    _tenant_secret: Option<&str>,
+    auth_label: &str,
+) -> String {
     if user.is_none() {
-        return include_str!("../static/index.html").to_string();
+        return include_str!("../static/index.html")
+            .replace("{{APP_AUTH_LABEL}}", &escape(auth_label));
     }
     let body = match user {
-        Some(user) => signed_in_body(user),
-        None => signed_out_body(),
+        Some(user) => signed_in_body(user, auth_label),
+        None => signed_out_body(auth_label),
     };
 
     page(&body)
@@ -22,17 +27,19 @@ pub fn render_platform_connect(
     target_origin: &str,
     csrf: &str,
     include_tenant_secret: bool,
+    auth_label: &str,
 ) -> String {
     let body = match user {
         None => format!(
             r#"
             <div class="card">
               <h1>Connect {platform}</h1>
-              <p>Sign in with Google to continue.</p>
-              <a class="button" href="/auth/login">Log in with Google</a>
+              <p>Sign in with {auth_label} to continue.</p>
+              <a class="button" href="/auth/login">Log in with {auth_label}</a>
             </div>
             "#,
             platform = escape(&platform_label(platform)),
+            auth_label = escape(auth_label),
         ),
         Some(user) => {
             let tenant_consent = if include_tenant_secret {
@@ -44,7 +51,7 @@ pub fn render_platform_connect(
                 r#"
                 <div class="card">
                   <h1>Connect {platform}</h1>
-                  <p>You are logged in with Google as <span class="email">{email}</span></p>
+                  <p>You are logged in with {auth_label} as <span class="email">{email}</span></p>
                   <p>Target Atomic Data Hub: <span class="email">{target_origin}</span></p>
                   {tenant_consent}
                   <form method="post" action="/connect/authorize">
@@ -58,6 +65,7 @@ pub fn render_platform_connect(
                 target_origin = escape(target_origin),
                 csrf = escape(csrf),
                 tenant_consent = tenant_consent,
+                auth_label = escape(auth_label),
             )
         }
     };
@@ -111,18 +119,20 @@ pub fn render_connect(params: &crate::proxy::ConnectParams, platforms: &[String]
     page(&body)
 }
 
-fn signed_out_body() -> String {
-    r#"
+fn signed_out_body(auth_label: &str) -> String {
+    format!(
+        r#"
     <div class="card">
       <h1>auth-proxy</h1>
-      <p>Sign in with your Google account to continue.</p>
-      <a class="button" href="/auth/login">Log in with Google</a>
+      <p>Sign in with your {auth_label} account to continue.</p>
+      <a class="button" href="/auth/login">Log in with {auth_label}</a>
     </div>
-    "#
-    .to_string()
+    "#,
+        auth_label = escape(auth_label),
+    )
 }
 
-fn signed_in_body(user: &SessionUser) -> String {
+fn signed_in_body(user: &SessionUser, auth_label: &str) -> String {
     let avatar = user
         .picture
         .as_deref()
@@ -133,30 +143,27 @@ fn signed_in_body(user: &SessionUser) -> String {
         r#"
         <div class="card">
           {avatar}
-          <h1>You are logged in with Google as {email}</h1>
+            <h1>You are logged in with {auth_label} as {email}</h1>
         </div>
         "#,
         avatar = avatar,
         email = escape(&user.email),
+        auth_label = escape(auth_label),
     )
 }
 
 fn platform_label(platform: &str) -> String {
-    match platform {
-        "github-issues" => "GitHub".to_string(),
-        "google-calendar" => "Google Calendar".to_string(),
-        other => other
-            .split('-')
-            .map(|part| {
-                let mut chars = part.chars();
-                match chars.next() {
-                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-                    None => String::new(),
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(" "),
-    }
+    platform
+        .split('-')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn page(body: &str) -> String {
@@ -242,7 +249,7 @@ mod tests {
 
     fn test_user() -> SessionUser {
         SessionUser::new(
-            "google-sub-123".to_string(),
+            "oidc-sub-123".to_string(),
             "user@example.com".to_string(),
             "<script>alert(1)</script>".to_string(),
             None,
@@ -251,24 +258,24 @@ mod tests {
 
     #[test]
     fn signed_out_shows_login_link() {
-        let html = render_home(None, None);
-        assert!(html.contains("Log in with Google"));
+        let html = render_home(None, None, "Example Login");
+        assert!(html.contains("Log in with Example Login"));
         assert!(html.contains(r#"href="/auth/login""#));
     }
 
     #[test]
-    fn signed_in_shows_google_identity_without_secrets() {
-        let html = render_home(Some(&test_user()), Some("the-secret"));
+    fn signed_in_shows_oidc_identity_without_secrets() {
+        let html = render_home(Some(&test_user()), Some("the-secret"), "Example Login");
         assert!(!html.contains("the-secret"));
         assert!(!html.contains("tenant secret"));
-        assert!(html.contains("You are logged in with Google as"));
+        assert!(html.contains("You are logged in with Example Login as"));
     }
 
     #[test]
     fn signed_in_escapes_untrusted_fields() {
         let mut user = test_user();
         user.email = "<script>alert(1)</script>".to_string();
-        let html = render_home(Some(&user), Some("<b>not-html</b>"));
+        let html = render_home(Some(&user), Some("<b>not-html</b>"), "Example Login");
         assert!(!html.contains("<script>"));
         assert!(!html.contains("<b>not-html</b>"));
         assert!(html.contains("&lt;script&gt;"));
@@ -277,7 +284,7 @@ mod tests {
 
     #[test]
     fn render_home_allows_missing_secret_while_signed_in() {
-        render_home(Some(&test_user()), None);
+        render_home(Some(&test_user()), None, "Example Login");
     }
 
     #[test]
@@ -288,6 +295,7 @@ mod tests {
             "https://hub.example/\"><script>alert(1)</script>",
             "csrf&<\"",
             true,
+            "Example Login",
         );
         assert!(html.contains("Google Calendar"));
         assert!(html.contains("Use LocalThought to sync Google Calendar with your Atomic Data Hub"));
