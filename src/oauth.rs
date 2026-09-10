@@ -104,7 +104,7 @@ pub async fn begin(
     user_id: &str,
     context: Option<String>,
 ) -> Result<String, ()> {
-    let provider = Provider::configured(name).map_err(|_| ())?;
+    let provider = Provider::configured(&state.catalog, name).map_err(|_| ())?;
     let security = state.security.as_ref().ok_or(())?;
     if security.is_revoked(tenant_id, user_id) {
         return Err(());
@@ -131,7 +131,7 @@ pub async fn begin(
         )
         .await
         .map_err(|_| ())?;
-    let mut url = Url::parse(provider.provider.authorization_url).map_err(|_| ())?;
+    let mut url = Url::parse(&provider.provider.authorization_url).map_err(|_| ())?;
     url.query_pairs_mut()
         .append_pair("response_type", "code")
         .append_pair("client_id", &provider.client_id)
@@ -158,7 +158,7 @@ async fn callback_response(
     query: Callback,
     jar: PrivateCookieJar,
 ) -> Response {
-    let Ok(provider) = Provider::configured(&name) else {
+    let Ok(provider) = Provider::configured(&state.catalog, &name) else {
         return error();
     };
     let Some(security) = &state.security else {

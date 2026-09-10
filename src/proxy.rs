@@ -249,7 +249,7 @@ async fn refresh_if_needed(state: &AppState, credential: &mut Credential) -> Res
         return Ok(());
     }
     let refresh_token = credential.refresh_token.as_deref().ok_or(())?;
-    let provider = crate::providers::Provider::configured(&credential.provider).map_err(|_| ())?;
+    let provider = crate::providers::Provider::configured(&state.catalog, &credential.provider).map_err(|_| ())?;
     let response = provider
         .token_request(
             &state.http_client,

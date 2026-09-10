@@ -100,7 +100,7 @@ impl Request {
             || URL_SAFE_NO_PAD
                 .decode(&self.code_challenge)
                 .map_or(true, |b| b.len() != 32)
-            || crate::providers::known(&self.platform).is_none()
+            || crate::config::Config::provider_env_prefix(&self.platform).is_err()
         {
             return Err("Invalid connection request");
         }
@@ -202,7 +202,7 @@ pub async fn page(
         Err(message) => return error(message),
     };
     if !state.catalog.names().contains(&request.platform)
-        || Provider::configured(&request.platform).is_err()
+        || Provider::configured(&state.catalog, &request.platform).is_err()
     {
         return error("This platform is not available for connection");
     }
@@ -239,8 +239,8 @@ pub async fn page(
         .insert(header::REFERRER_POLICY, "same-origin".parse().unwrap());
     // Chrome applies form-action to redirects too, including an already-authorized
     // provider returning straight through its callback to the hub.
-    let provider = crate::providers::known(&request.platform).unwrap();
-    let provider_origin = Url::parse(provider.authorization_url)
+    let provider = state.catalog.oauth_provider(&request.platform).unwrap();
+    let provider_origin = Url::parse(&provider.authorization_url)
         .unwrap()
         .origin()
         .ascii_serialization();
