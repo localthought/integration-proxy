@@ -71,7 +71,7 @@ directly):
 | `PORT`                 | no       | Port to listen on. Defaults to `8080`.                                      |
 | `SESSION_SECRET`       | no       | Secret used to encrypt session cookies. If unset, a random key is generated at startup and sessions are invalidated whenever the process restarts. Set this to a persistent random value in production. |
 | `SERVER_SECRET`        | yes      | Secret used to deterministically derive each tenant's secret (see above). Must stay constant across restarts and instances. |
-| `CATALOG_PATH`         | no       | Path to the catalog configuration. Defaults to `catalog.yaml`. |
+| `CATALOG_PATH`         | no       | Local path or immutable HTTPS URL for the catalog JSON. Defaults to the pinned `localthought/overlays` `catalog.json` revision. |
 | `DATABASE_URL`          | yes      | PostgreSQL connection URL. Stores short-lived, consumed challenge nonces to prevent replay. |
 | `ENCRYPTION_KEY`        | yes      | Base64url-encoded, random 32-byte key for versioned XChaCha20-Poly1305 credential envelopes. |
 | `REVOKED_SUBJECTS`      | no       | Comma-separated tenant and user IDs denied access. |
@@ -128,13 +128,19 @@ scope). The initial integration imports contacts; supply the administration ID
 from the Moneybird account when connecting. OAuth tokens without `expires_in`
 remain usable until revoked; tokens with an expiry use the normal refresh flow.
 
-`catalog.yaml` is the source of the integration catalog. Each platform names
+`catalog.json` in the `localthought/overlays` repository is the source of the
+integration catalog. The proxy defaults to an immutable raw GitHub URL for a
+specific catalog commit; set `CATALOG_PATH` to another HTTPS revision for a
+controlled rollout, or to a local fixture for development. Each platform names
 one pinned OpenAPI document and zero or more pinned Overlay Specification
 documents. At startup the proxy downloads those HTTPS sources, applies each
-overlay's `update` actions, and keeps the resulting YAML in memory. Edit this
-file and restart the service to add, remove, or update a platform. The default
-catalog pins GitHub Issues and Google Calendar to the revisions requested in
-issue #6.
+overlay's `update` actions, and keeps the resulting YAML in memory.
+
+Publish catalog changes in this order: publish and verify the immutable OAD and
+overlay pins, commit the root `catalog.json`, then update the proxy's pinned
+catalog URL and restart the service. Keep each OAD and overlay URL pinned to a
+commit so the generated `/catalog` documents change only through an explicit
+catalog revision.
 
 ### 3. Run it
 
