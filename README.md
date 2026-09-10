@@ -139,6 +139,12 @@ one pinned OpenAPI document and zero or more pinned Overlay Specification
 documents. At startup the proxy downloads those HTTPS sources, applies each
 overlay's `update` actions, and keeps the resulting YAML in memory.
 
+A catalog entry may also contain a `selection` object with consumer query
+choices. `GET /catalog/{platform}.selection.json` returns that object (or `{}`
+when absent). It remains separate from the composed OpenAPI document: choosing
+to include archived records is client configuration, not an API default. The
+proxy passes this configuration through and does not interpret its fields.
+
 Publish catalog changes in this order: publish and verify the immutable OAD and
 overlay pins, commit the root `catalog.json`, then update the proxy's pinned
 catalog URL and restart the service. Keep each OAD and overlay URL pinned to a
