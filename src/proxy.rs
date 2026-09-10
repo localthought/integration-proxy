@@ -339,8 +339,8 @@ pub async fn forward(
     target.set_path(&request_path);
     let upstream = match upstream_request(
         &state.http_client,
-        method,
-        target,
+        method.clone(),
+        target.clone(),
         query.as_deref(),
         &credential.access_token,
         &headers,
@@ -353,7 +353,14 @@ pub async fn forward(
         Err(_) => return (StatusCode::BAD_GATEWAY, "upstream request failed").into_response(),
     };
     let status = upstream.status();
-    let forwarded_headers = upstream_response_headers(upstream.headers());
+    let mut forwarded_headers = upstream_response_headers(upstream.headers());
+    normalize_pagination_links(
+        &mut forwarded_headers,
+        platform,
+        &method,
+        &request_path,
+        &target,
+    );
     let bytes = match upstream.bytes().await {
         Ok(bytes) if bytes.len() <= 10_485_760 => bytes,
         _ => {
@@ -407,6 +414,80 @@ fn upstream_response_headers(headers: &HeaderMap) -> HeaderMap {
         }
     }
     result
+}
+
+fn normalize_pagination_links(
+    headers: &mut HeaderMap,
+    platform: &str,
+    method: &axum::http::Method,
+    request_path: &str,
+    upstream: &Url,
+) {
+    if platform != "github-issues" || method != axum::http::Method::GET {
+        return;
+    }
+    let Some(rest) = request_path.strip_prefix("/repos/") else {
+        return;
+    };
+    let mut parts = rest.splitn(3, '/');
+    let (Some(owner), Some(repository), Some(suffix)) = (parts.next(), parts.next(), parts.next())
+    else {
+        return;
+    };
+    if owner.is_empty() || repository.is_empty() || suffix.is_empty() {
+        return;
+    }
+    let expected_suffix = format!("/{suffix}");
+    let values: Vec<_> = headers.get_all(header::LINK).iter().cloned().collect();
+    if values.is_empty() {
+        return;
+    }
+    headers.remove(header::LINK);
+    for value in values {
+        let Ok(text) = value.to_str() else {
+            headers.append(header::LINK, value);
+            continue;
+        };
+        let mut rewritten = String::with_capacity(text.len());
+        let mut remaining = text;
+        while let Some(open) = remaining.find('<') {
+            rewritten.push_str(&remaining[..=open]);
+            remaining = &remaining[open + 1..];
+            let Some(close) = remaining.find('>') else {
+                rewritten.push_str(remaining);
+                remaining = "";
+                break;
+            };
+            let raw_url = &remaining[..close];
+            let replacement = Url::parse(raw_url).ok().and_then(|mut url| {
+                if url.origin() != upstream.origin()
+                    || !url.username().is_empty()
+                    || url.password().is_some()
+                    || url.fragment().is_some()
+                {
+                    return None;
+                }
+                let canonical = url.path().strip_prefix("/repositories/")?;
+                let (repository_id, canonical_suffix) = canonical.split_once('/')?;
+                if repository_id.is_empty()
+                    || !repository_id.bytes().all(|byte| byte.is_ascii_digit())
+                    || format!("/{canonical_suffix}") != expected_suffix
+                {
+                    return None;
+                }
+                url.set_path(request_path);
+                Some(url.to_string())
+            });
+            rewritten.push_str(replacement.as_deref().unwrap_or(raw_url));
+            rewritten.push('>');
+            remaining = &remaining[close + 1..];
+        }
+        rewritten.push_str(remaining);
+        headers.append(
+            header::LINK,
+            rewritten.parse().unwrap_or_else(|_| value.clone()),
+        );
+    }
 }
 
 fn upstream_request(
@@ -579,6 +660,77 @@ mod tests {
         assert_eq!(forwarded[header::CONTENT_TYPE], "application/json");
         assert!(!forwarded.contains_key(header::SET_COOKIE));
         assert!(!forwarded.contains_key("x-connection-code"));
+    }
+
+    #[test]
+    fn github_canonical_pagination_link_uses_the_allowlisted_repository_alias() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::LINK,
+            HeaderValue::from_static(
+                "<https://api.github.com/repositories/1360229799/issues?state=all&after=cursor&per_page=30&page=2>; rel=\"next\", <https://api.github.com/repositories/1360229799/issues?state=all&per_page=30&page=4>; rel=\"last\"",
+            ),
+        );
+
+        normalize_pagination_links(
+            &mut headers,
+            "github-issues",
+            &axum::http::Method::GET,
+            "/repos/localthought/integration-proxy/issues",
+            &Url::parse("https://api.github.com").unwrap(),
+        );
+
+        assert_eq!(
+            headers[header::LINK],
+            "<https://api.github.com/repos/localthought/integration-proxy/issues?state=all&after=cursor&per_page=30&page=2>; rel=\"next\", <https://api.github.com/repos/localthought/integration-proxy/issues?state=all&per_page=30&page=4>; rel=\"last\""
+        );
+    }
+
+    #[test]
+    fn github_link_normalization_does_not_change_other_endpoints_or_origins() {
+        for (platform, method, request_path, link) in [
+            (
+                "github-issues",
+                axum::http::Method::GET,
+                "/repos/o/r/issues",
+                "<https://api.github.com/repositories/123/pulls?page=2>; rel=\"next\"",
+            ),
+            (
+                "github-issues",
+                axum::http::Method::GET,
+                "/repos/o/r/issues",
+                "<https://example.com/repositories/123/issues?page=2>; rel=\"next\"",
+            ),
+            (
+                "github-issues",
+                axum::http::Method::GET,
+                "/repos/o/r/issues",
+                "<https://api.github.com/repositories/not-numeric/issues?page=2>; rel=\"next\"",
+            ),
+            (
+                "google-calendar",
+                axum::http::Method::GET,
+                "/repos/o/r/issues",
+                "<https://api.github.com/repositories/123/issues?page=2>; rel=\"next\"",
+            ),
+            (
+                "github-issues",
+                axum::http::Method::POST,
+                "/repos/o/r/issues",
+                "<https://api.github.com/repositories/123/issues?page=2>; rel=\"next\"",
+            ),
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::LINK, HeaderValue::from_str(link).unwrap());
+            normalize_pagination_links(
+                &mut headers,
+                platform,
+                &method,
+                request_path,
+                &Url::parse("https://api.github.com").unwrap(),
+            );
+            assert_eq!(headers[header::LINK], link);
+        }
     }
 
     fn logged_in_jar(key: Key) -> (PrivateCookieJar, crate::session::SessionUser) {
