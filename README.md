@@ -115,6 +115,17 @@ number of guilds for a user. The profile endpoint is available as a read
 operation, not an imported collection.
 Discord access tokens expire and use the existing refresh-token flow.
 
+Spotify uses `OAUTH_SPOTIFY_CLIENT_ID` and the callback
+`https://localthought.io/oauth/spotify/callback` in production. Register a
+Spotify Web API app with that exact redirect URI. The integration uses
+Authorization Code with PKCE, so no client secret is required or transmitted.
+It imports playlists with `playlist-read-private` and
+`playlist-read-collaborative`; no write scopes are requested. No account ID
+parameter is needed. Development-mode access is subject to Spotify's Premium
+and app-user allowlist requirements. Access tokens refresh automatically;
+expired or revoked refresh tokens require reconnecting through OAuth.
+
+
 Moneybird uses `OAUTH_MONEYBIRD_CLIENT_ID` and
 `OAUTH_MONEYBIRD_CLIENT_SECRET`, with callback
 `https://localthought.io/oauth/moneybird/callback` in production. Register an
@@ -185,3 +196,15 @@ OPTIONS preflights. Responses expose `X-Connection-Code`, `Link`, `Retry-After`,
 before continuing pagination and must never replay a consumed code after an
 uncertain response. Cookie credentials are not enabled for CORS; provider
 login and consent remain top-level browser navigations.
+
+## Todoist
+
+The `todoist` platform imports projects and active tasks through Todoist API v1
+with the read-only `data:read` scope. Configure `OAUTH_TODOIST_CLIENT_ID` and
+`OAUTH_TODOIST_CLIENT_SECRET`, and register
+`https://localthought.io/oauth/todoist/callback` as the OAuth redirect URL.
+New Todoist applications issue expiring access tokens and rotating refresh
+tokens; the proxy stores and refreshes these through its existing credential flow.
+Legacy non-expiring access tokens are also supported. No provider writes are exposed.
+
+Provider documentation: https://developer.todoist.com/api/v1/

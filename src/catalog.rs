@@ -243,6 +243,44 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "downloads the pinned production catalog sources"]
+    async fn pinned_todoist_catalog_is_read_only_and_preserves_api_prefix() {
+        let catalog = Catalog::load("catalog.yaml", &crate::build_http_client())
+            .await
+            .unwrap();
+        let document: Value = serde_yaml::from_str(catalog.get("todoist").unwrap()).unwrap();
+        let resources = document
+            .pointer("/components/crudResources")
+            .unwrap()
+            .as_object()
+            .unwrap();
+        assert_eq!(resources.len(), 2);
+        for resource in resources.values() {
+            let reference = resource.pointer("/schema/$ref").unwrap().as_str().unwrap();
+            assert!(document
+                .pointer(reference.strip_prefix('#').unwrap())
+                .is_some());
+        }
+        for path in [
+            "/api/v1/projects",
+            "/api/v1/tasks",
+            "/api/v1/projects/example",
+            "/api/v1/tasks/example",
+        ] {
+            assert_eq!(
+                catalog.allows("todoist", "GET", path).unwrap().as_str(),
+                "https://api.todoist.com/api/v1"
+            );
+            for method in ["POST", "PUT", "PATCH", "DELETE"] {
+                assert!(catalog.allows("todoist", method, path).is_none());
+            }
+        }
+        for path in ["/tasks", "/api/v10/tasks", "/api/v1/access_tokens"] {
+            assert!(catalog.allows("todoist", "GET", path).is_none());
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "downloads the pinned production catalog sources"]
     async fn pinned_discord_catalog_composes_and_allows_only_user_reads() {
         let catalog = Catalog::load("catalog.yaml", &crate::build_http_client())
             .await
@@ -341,6 +379,32 @@ mod tests {
             .allows("moneybird", "GET", "/api/v20/123/contacts.json")
             .is_none());
     }
+    #[tokio::test]
+    #[ignore = "downloads the pinned production catalog sources"]
+    async fn pinned_spotify_catalog_composes_and_allows_readonly_playlists() {
+        let catalog = Catalog::load("catalog.yaml", &crate::build_http_client())
+            .await
+            .unwrap();
+        let document: Value = serde_yaml::from_str(catalog.get("spotify").unwrap()).unwrap();
+        assert!(document
+            .pointer("/components/crudResources")
+            .unwrap()
+            .as_object()
+            .is_some_and(|resources| !resources.is_empty()));
+        assert_eq!(
+            catalog
+                .allows("spotify", "GET", "/v1/me/playlists")
+                .unwrap()
+                .as_str(),
+            "https://api.spotify.com/v1"
+        );
+        assert!(catalog
+            .allows("spotify", "POST", "/v1/me/playlists")
+            .is_none());
+        assert!(catalog.allows("spotify", "GET", "/me/playlists").is_none());
+        assert!(catalog.allows("spotify", "GET", "/v1/me/tracks").is_none());
+    }
+
     #[test]
     fn validates_google_endpoints_relative_to_server_base_path() {
         for server in [

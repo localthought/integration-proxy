@@ -151,18 +151,16 @@ pub async fn callback(
         state.base_url.trim_end_matches('/'),
         name
     );
-    let response = match state
-        .http_client
-        .post(provider.provider.token_url)
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("code", query.code.as_str()),
-            ("redirect_uri", callback.as_str()),
-            ("client_id", provider.client_id.as_str()),
-            ("client_secret", provider.client_secret.as_str()),
-            ("code_verifier", verifier.as_str()),
-        ])
-        .header("accept", "application/json")
+    let response = match provider
+        .token_request(
+            &state.http_client,
+            &[
+                ("grant_type", "authorization_code"),
+                ("code", query.code.as_str()),
+                ("redirect_uri", callback.as_str()),
+                ("code_verifier", verifier.as_str()),
+            ],
+        )
         .send()
         .await
     {
