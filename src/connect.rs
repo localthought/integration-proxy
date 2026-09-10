@@ -152,7 +152,7 @@ pub(crate) fn protected(response: impl IntoResponse) -> Response {
     response
         .headers_mut()
         .insert("referrer-policy", "no-referrer".parse().unwrap());
-    response.headers_mut().insert("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' https:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'".parse().unwrap());
+    response.headers_mut().insert("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' https:; frame-ancestors 'none'; base-uri 'none'".parse().unwrap());
     response
 }
 
@@ -222,7 +222,7 @@ pub async fn page(
     } else {
         jar
     };
-    protected((
+    let mut response = protected((
         jar,
         Html(templates::render_platform_connect(
             user.as_ref(),
@@ -231,7 +231,26 @@ pub async fn page(
             &consent.csrf,
             request.credentials == Credentials::ConnectionAndTenantSecret,
         )),
-    ))
+    ));
+    // Chrome applies form-action to redirects too, including an already-authorized
+    // provider returning straight through its callback to the hub.
+    let provider = crate::providers::known(&request.platform).unwrap();
+    let provider_origin = Url::parse(provider.authorization_url)
+        .unwrap()
+        .origin()
+        .ascii_serialization();
+    let policy = format!(
+        "{}; form-action 'self' {} {}",
+        response.headers()["content-security-policy"]
+            .to_str()
+            .unwrap(),
+        provider_origin,
+        target.origin().ascii_serialization()
+    );
+    response
+        .headers_mut()
+        .insert("content-security-policy", policy.parse().unwrap());
+    response
 }
 
 #[derive(Deserialize)]
@@ -484,6 +503,13 @@ mod tests {
             .await
             .unwrap();
         let status = response.status();
+        if status == StatusCode::OK {
+            let policy = response.headers()["content-security-policy"]
+                .to_str()
+                .unwrap();
+            assert!(policy.contains("form-action 'self' https://github.com https://hub.example"));
+            assert!(!policy.contains("spotify"));
+        }
         let body = axum::body::to_bytes(response.into_body(), 16384)
             .await
             .unwrap();
