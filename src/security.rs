@@ -38,7 +38,7 @@ impl Security {
             .map_err(|_| "ENCRYPTION_KEY must decode to exactly 32 bytes")?;
         let tls = native_tls::TlsConnector::new().map_err(|e| e.to_string())?;
         let tls = postgres_native_tls::MakeTlsConnector::new(tls);
-        let (database, connection) = tokio_postgres::connect(database_url, tls)
+        let (mut database, connection) = tokio_postgres::connect(database_url, tls)
             .await
             .map_err(|e| e.to_string())?;
         tokio::spawn(async move {
@@ -46,9 +46,16 @@ impl Security {
                 tracing::error!(%error, "postgres connection failed");
             }
         });
-        database.batch_execute("CREATE TABLE IF NOT EXISTS used_challenges (nonce TEXT PRIMARY KEY, expires_at TIMESTAMPTZ NOT NULL)").await.map_err(|e| e.to_string())?;
-        database.batch_execute("CREATE TABLE IF NOT EXISTS oauth_states (state TEXT PRIMARY KEY, provider TEXT NOT NULL, redirect_uri TEXT NOT NULL, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, verifier TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL); CREATE TABLE IF NOT EXISTS connection_codes (code TEXT PRIMARY KEY, envelope TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL)").await.map_err(|e| e.to_string())?;
-        database.batch_execute("ALTER TABLE oauth_states ADD COLUMN IF NOT EXISTS context TEXT; CREATE TABLE IF NOT EXISTS connection_handoffs (code TEXT PRIMARY KEY, challenge TEXT NOT NULL, envelope TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL)").await.map_err(|e| e.to_string())?;
+        let transaction = database.transaction().await.map_err(|e| e.to_string())?;
+        transaction
+            .query_one(
+                "SELECT pg_advisory_xact_lock($1)",
+                &[&7_316_186_474_691_124_077_i64],
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        transaction.batch_execute("CREATE TABLE IF NOT EXISTS used_challenges (nonce TEXT PRIMARY KEY, expires_at TIMESTAMPTZ NOT NULL); CREATE TABLE IF NOT EXISTS oauth_states (state TEXT PRIMARY KEY, provider TEXT NOT NULL, redirect_uri TEXT NOT NULL, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, verifier TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL); CREATE TABLE IF NOT EXISTS connection_codes (code TEXT PRIMARY KEY, envelope TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL); ALTER TABLE oauth_states ADD COLUMN IF NOT EXISTS context TEXT; CREATE TABLE IF NOT EXISTS connection_handoffs (code TEXT PRIMARY KEY, challenge TEXT NOT NULL, envelope TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL)").await.map_err(|e| e.to_string())?;
+        transaction.commit().await.map_err(|e| e.to_string())?;
         Ok(Self {
             database: Arc::new(database),
             encryption_key,
@@ -164,5 +171,66 @@ impl Security {
 
     pub async fn take_connection_code(&self, code: &str) -> Result<Option<String>, String> {
         self.database.query_opt("DELETE FROM connection_codes WHERE code = $1 AND expires_at > NOW() RETURNING envelope", &[&code]).await.map_err(|e| e.to_string()).map(|row| row.map(|r| r.get(0)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::Barrier;
+
+    const TEST_KEY: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    #[ignore = "requires TEST_DATABASE_URL; CI runs with --include-ignored"]
+    async fn concurrent_connections_initialize_a_fresh_schema() {
+        let database_url = std::env::var("TEST_DATABASE_URL")
+            .expect("set TEST_DATABASE_URL to an isolated test database");
+        let (admin, connection) = tokio_postgres::connect(&database_url, tokio_postgres::NoTls)
+            .await
+            .expect("connect to test database");
+        tokio::spawn(async move {
+            connection.await.expect("test database connection");
+        });
+
+        let schema = format!("security_connect_{:016x}", rand::random::<u64>());
+        admin
+            .batch_execute(&format!("CREATE SCHEMA \"{schema}\""))
+            .await
+            .expect("create test schema");
+        let mut scoped_url = url::Url::parse(&database_url).expect("parse TEST_DATABASE_URL");
+        scoped_url
+            .query_pairs_mut()
+            .append_pair("options", &format!("-csearch_path={schema}"));
+        let scoped_url = scoped_url.to_string();
+        let barrier = Arc::new(Barrier::new(8));
+        let mut connections = tokio::task::JoinSet::new();
+        for _ in 0..8 {
+            let barrier = barrier.clone();
+            let scoped_url = scoped_url.clone();
+            connections.spawn(async move {
+                barrier.wait().await;
+                Security::connect(&scoped_url, TEST_KEY, vec![]).await
+            });
+        }
+
+        let mut initialized = Vec::new();
+        let mut errors = Vec::new();
+        while let Some(result) = connections.join_next().await {
+            match result.expect("initializer task") {
+                Ok(security) => initialized.push(security),
+                Err(error) => errors.push(error),
+            }
+        }
+        drop(initialized);
+        admin
+            .batch_execute(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
+            .await
+            .expect("drop test schema");
+
+        assert!(
+            errors.is_empty(),
+            "concurrent schema initialization failed: {errors:?}"
+        );
     }
 }
