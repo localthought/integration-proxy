@@ -164,8 +164,11 @@ impl Security {
         self.database.query_opt("DELETE FROM connection_handoffs WHERE code = $1 AND challenge = $2 AND expires_at > NOW() RETURNING envelope", &[&code, &challenge]).await.map_err(|e| e.to_string()).map(|row| row.map(|r| r.get(0)))
     }
 
+    // Allow a provider-mandated five-minute Retry-After without expiring the
+    // next single-use credential while the client is waiting. OAuth handoffs
+    // retain their separate five-minute lifetime.
     pub async fn store_connection_code(&self, code: &str, envelope: &str) -> Result<(), String> {
-        self.database.execute("INSERT INTO connection_codes (code, envelope, expires_at) VALUES ($1,$2,NOW() + INTERVAL '5 minutes')", &[&code, &envelope]).await.map_err(|e| e.to_string())?;
+        self.database.execute("INSERT INTO connection_codes (code, envelope, expires_at) VALUES ($1,$2,NOW() + INTERVAL '10 minutes')", &[&code, &envelope]).await.map_err(|e| e.to_string())?;
         Ok(())
     }
 

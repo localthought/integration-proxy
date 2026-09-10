@@ -1,4 +1,4 @@
-//! Browser bootstrap: Google identity, explicit platform consent, and a PKCE handoff.
+//! Browser bootstrap: application identity, explicit platform consent, and a PKCE handoff.
 use crate::{oauth, providers::Provider, security::Security, session, templates, AppState};
 use axum::{
     extract::{Form, OriginalUri, Query, State},
@@ -100,7 +100,7 @@ impl Request {
             || URL_SAFE_NO_PAD
                 .decode(&self.code_challenge)
                 .map_or(true, |b| b.len() != 32)
-            || crate::providers::known(&self.platform).is_none()
+            || crate::config::Config::provider_env_prefix(&self.platform).is_err()
         {
             return Err("Invalid connection request");
         }
@@ -202,7 +202,7 @@ pub async fn page(
         Err(message) => return error(message),
     };
     if !state.catalog.names().contains(&request.platform)
-        || Provider::configured(&request.platform).is_err()
+        || Provider::configured(&state.catalog, &request.platform).is_err()
     {
         return error("This platform is not available for connection");
     }
@@ -216,7 +216,7 @@ pub async fn page(
         CONSENT_COOKIE,
         serde_json::to_string(&consent).unwrap(),
     ));
-    // Preserve the entire selected-platform request through Google authentication.
+    // Preserve the entire selected-platform request through application authentication.
     let jar = if user.is_none() {
         session::set_connect_redirect(jar, &request.local_url())
     } else {
@@ -230,17 +230,18 @@ pub async fn page(
             &target.origin().ascii_serialization(),
             &consent.csrf,
             request.credentials == Credentials::ConnectionAndTenantSecret,
+            &state.app_auth_label,
         )),
     ));
     // Keep the consent form's same-origin POST attributable while sending no
-    // referrer to Google or the selected provider.
+    // referrer to the configured identity provider or selected provider.
     response
         .headers_mut()
         .insert(header::REFERRER_POLICY, "same-origin".parse().unwrap());
     // Chrome applies form-action to redirects too, including an already-authorized
     // provider returning straight through its callback to the hub.
-    let provider = crate::providers::known(&request.platform).unwrap();
-    let provider_origin = Url::parse(provider.authorization_url)
+    let provider = state.catalog.oauth_provider(&request.platform).unwrap();
+    let provider_origin = Url::parse(&provider.authorization_url)
         .unwrap()
         .origin()
         .ascii_serialization();
@@ -289,12 +290,12 @@ pub async fn authorize(
         return error("Connection request expired or invalid; start again from your hub");
     }
     let Some(user) = session::read_session(&jar) else {
-        return error("Log in with Google before connecting");
+        return error("Log in before connecting");
     };
     let Some(security) = &state.security else {
         return error("Connections are unavailable");
     };
-    if security.is_revoked(&user.google_sub, &consent.request.user_id)
+    if security.is_revoked(&user.subject, &consent.request.user_id)
         || !matches!(
             security
                 .consume_nonce(&format!("consent:{}", consent.csrf))
@@ -319,7 +320,7 @@ pub async fn authorize(
         &state,
         &request.platform,
         &request.redirect_uri,
-        &user.google_sub,
+        &user.subject,
         &request.user_id,
         Some(sealed_context),
     )
@@ -343,7 +344,7 @@ pub fn oauth_context(
     let context: OAuthContext =
         serde_json::from_slice(&security.open(value, b"platform-oauth-v1")?).ok()?;
     let user = session::read_session(jar)?;
-    if jar.get(PROVIDER_COOKIE)?.value() != context.binding || user.google_sub != tenant_id {
+    if jar.get(PROVIDER_COOKIE)?.value() != context.binding || user.subject != tenant_id {
         return None;
     }
     Some(context)
@@ -484,6 +485,8 @@ mod tests {
                     .unwrap(),
                 None,
             ),
+            app_auth_userinfo_url: "https://accounts.example/userinfo".into(),
+            app_auth_label: "OIDC".into(),
             http_client: crate::build_http_client(),
             key: axum_extra::extract::cookie::Key::generate(),
             server_secret: "fixture-server-secret".into(),
@@ -512,7 +515,7 @@ mod tests {
             let policy = response.headers()["content-security-policy"]
                 .to_str()
                 .unwrap();
-            assert!(policy.contains("form-action 'self' https://github.com https://hub.example"));
+            assert!(policy.contains("form-action 'self' https://auth.example https://hub.example"));
             assert!(!policy.contains("spotify"));
             assert_eq!(response.headers()[header::REFERRER_POLICY], "same-origin");
         }
@@ -560,7 +563,7 @@ mod tests {
         let body = axum::body::to_bytes(result.into_body(), 16384)
             .await
             .unwrap();
-        assert!(String::from_utf8_lossy(&body).contains("Log in with Google"));
+        assert!(String::from_utf8_lossy(&body).contains("Log in before connecting"));
     }
 
     #[tokio::test]
@@ -836,7 +839,7 @@ mod tests {
         );
         let destination =
             Url::parse(response.headers()[header::LOCATION].to_str().unwrap()).unwrap();
-        assert_eq!(destination.host_str(), Some("github.com"));
+        assert_eq!(destination.host_str(), Some("auth.example"));
         let provider_state = destination
             .query_pairs()
             .find(|(k, _)| k == "state")
@@ -848,7 +851,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(stored.tenant_id, user.google_sub);
+        assert_eq!(stored.tenant_id, user.subject);
         assert_eq!(stored.user_id, consent.request.user_id);
         assert_eq!(stored.provider, "github-issues");
         assert_eq!(stored.redirect_uri, consent.request.redirect_uri);

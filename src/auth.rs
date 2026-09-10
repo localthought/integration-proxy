@@ -16,25 +16,22 @@ use crate::{
     AppState,
 };
 
-const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
-const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-const GOOGLE_USERINFO_URL: &str = "https://openidconnect.googleapis.com/v1/userinfo";
-
 pub fn build_client(config: &Config) -> Result<BasicClient, String> {
-    let auth_url = AuthUrl::new(GOOGLE_AUTH_URL.to_string()).map_err(|e| e.to_string())?;
-    let token_url = TokenUrl::new(GOOGLE_TOKEN_URL.to_string()).map_err(|e| e.to_string())?;
+    let auth_url =
+        AuthUrl::new(config.app_auth_authorization_url.clone()).map_err(|e| e.to_string())?;
+    let token_url = TokenUrl::new(config.app_auth_token_url.clone()).map_err(|e| e.to_string())?;
     let redirect_url = RedirectUrl::new(config.redirect_url()).map_err(|e| e.to_string())?;
 
     Ok(BasicClient::new(
-        ClientId::new(config.google_client_id.clone()),
-        Some(ClientSecret::new(config.google_client_secret.clone())),
+        ClientId::new(config.app_auth_client_id.clone()),
+        Some(ClientSecret::new(config.app_auth_client_secret.clone())),
         auth_url,
         Some(token_url),
     )
     .set_redirect_uri(redirect_url))
 }
 
-/// Redirects the browser to Google's consent screen, stashing the CSRF token
+/// Redirects the browser to the configured OIDC consent screen, stashing the CSRF token
 /// and PKCE verifier in a short-lived encrypted cookie (no server memory).
 pub async fn login(State(state): State<AppState>, jar: PrivateCookieJar) -> impl IntoResponse {
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
@@ -67,7 +64,7 @@ pub struct CallbackParams {
 }
 
 #[derive(Deserialize)]
-struct GoogleUserInfo {
+struct OidcUserInfo {
     sub: String,
     email: String,
     #[serde(default)]
@@ -106,9 +103,9 @@ pub async fn callback(
         .await
         .map_err(|_| AuthError::TokenExchangeFailed)?;
 
-    let userinfo: GoogleUserInfo = state
+    let userinfo: OidcUserInfo = state
         .http_client
-        .get(GOOGLE_USERINFO_URL)
+        .get(&state.app_auth_userinfo_url)
         .bearer_auth(token.access_token().secret())
         .send()
         .await
@@ -165,11 +162,11 @@ impl IntoResponse for AuthError {
             ),
             AuthError::TokenExchangeFailed => (
                 StatusCode::BAD_GATEWAY,
-                "Could not complete login with Google.",
+                "Could not complete application login.",
             ),
             AuthError::UserInfoFailed => (
                 StatusCode::BAD_GATEWAY,
-                "Could not fetch your Google profile.",
+                "Could not fetch the application user profile.",
             ),
         };
         (status, message).into_response()
@@ -181,8 +178,41 @@ mod tests {
     use super::*;
     use axum_extra::extract::cookie::Key;
 
+    fn config() -> Config {
+        Config {
+            app_auth_client_id: "client".into(),
+            app_auth_client_secret: "secret".into(),
+            app_auth_authorization_url: "https://issuer.example/authorize".into(),
+            app_auth_token_url: "https://issuer.example/token".into(),
+            app_auth_userinfo_url: "https://issuer.example/userinfo".into(),
+            app_auth_label: "Example Login".into(),
+            base_url: "https://proxy.example".into(),
+            port: 8080,
+            session_secret: None,
+            server_secret: "server".into(),
+            catalog_path: "catalog.yaml".into(),
+            database_url: "postgres://unused".into(),
+            encryption_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
+            revoked_subjects: vec![],
+        }
+    }
+
     #[test]
-    fn google_cancellation_preserves_hub_state_without_forwarding_provider_error() {
+    fn build_client_uses_configured_oidc_endpoints_and_client() {
+        let client = build_client(&config()).unwrap();
+        let (url, _) = client
+            .authorize_url(|| CsrfToken::new("state".into()))
+            .url();
+        assert_eq!(url.host_str(), Some("issuer.example"));
+        assert_eq!(url.path(), "/authorize");
+        assert_eq!(
+            url.query_pairs().find(|(k, _)| k == "client_id").unwrap().1,
+            "client"
+        );
+    }
+
+    #[test]
+    fn application_login_cancellation_preserves_hub_state_without_forwarding_provider_error() {
         let mut url = url::Url::parse("https://localthought.io/connect").unwrap();
         url.query_pairs_mut().append_pair("platform", "github-issues")
             .append_pair("redirect_uri", "https://hub.example/app/integrations?integration_state=fixture&platform=github-issues")

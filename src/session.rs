@@ -12,10 +12,10 @@ const SESSION_LIFETIME_SECS: u64 = 60 * 60 * 24 * 7; // 7 days
 /// session: it lives only inside the encrypted cookie, never on the server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionUser {
-    /// Google's stable, unique identifier for the account (the OIDC `sub`
+    /// Stable, unique identifier from the OIDC `sub`
     /// claim). Used as the identity for the tenant secret, since unlike
     /// email it never changes or gets reused.
-    pub google_sub: String,
+    pub subject: String,
     pub email: String,
     pub name: String,
     pub picture: Option<String>,
@@ -23,10 +23,10 @@ pub struct SessionUser {
 }
 
 impl SessionUser {
-    pub fn new(google_sub: String, email: String, name: String, picture: Option<String>) -> Self {
+    pub fn new(subject: String, email: String, name: String, picture: Option<String>) -> Self {
         let expires_at = now() + SESSION_LIFETIME_SECS;
         Self {
-            google_sub,
+            subject,
             email,
             name,
             picture,
@@ -105,7 +105,7 @@ pub struct OAuthState {
 }
 
 /// Stashes the complete relative `/connect?...` request in a short-lived
-/// private cookie, preserving platform and PKCE context through Google login.
+/// private cookie, preserving platform and PKCE context through application login.
 /// Older cookies containing only an external return URI remain readable.
 pub fn set_connect_redirect(jar: PrivateCookieJar, redirect_uri: &str) -> PrivateCookieJar {
     let cookie = Cookie::build((CONNECT_REDIRECT_COOKIE, redirect_uri.to_string()))
@@ -134,7 +134,7 @@ mod tests {
 
     fn test_user() -> SessionUser {
         SessionUser::new(
-            "google-sub-123".to_string(),
+            "oidc-sub-123".to_string(),
             "user@example.com".to_string(),
             "Test User".to_string(),
             None,
@@ -147,7 +147,7 @@ mod tests {
         let jar = set_session(jar, &test_user());
 
         let user = read_session(&jar).expect("session should be present");
-        assert_eq!(user.google_sub, "google-sub-123");
+        assert_eq!(user.subject, "oidc-sub-123");
         assert_eq!(user.email, "user@example.com");
     }
 
