@@ -7,11 +7,14 @@ pub struct Provider {
     pub authorization_url: String,
     pub token_url: String,
     pub scopes: Vec<String>,
+    pub authorization_params: Vec<(String, String)>,
+    pub use_pkce: bool,
+    supported_client_auth: Option<BTreeSet<String>>,
 }
 
 impl Provider {
     /// Read API capabilities from the composed document, never from platform names.
-    pub fn from_document(document: &Value) -> Result<Self, String> {
+    pub fn from_document(document: &Value, selected_scheme: Option<&str>) -> Result<Self, String> {
         let schemes = document
             .pointer("/components/securitySchemes")
             .and_then(Value::as_object)
@@ -26,9 +29,21 @@ impl Provider {
                 })?
             })
             .collect();
-        let [(scheme_name, flow)] = candidates.as_slice() else {
-            return Err("exactly one OAuth authorization-code scheme is required".into());
+        let (scheme_name, flow) = match selected_scheme {
+            Some(selected) => candidates
+                .iter()
+                .find(|(name, _)| name.as_str() == selected)
+                .copied()
+                .ok_or("selected OAuth security scheme is not an authorization-code scheme")?,
+            None => match candidates.as_slice() {
+                [candidate] => *candidate,
+                _ => return Err(
+                    "oauthSecurityScheme selection is required when multiple authorization-code schemes exist"
+                        .into(),
+                ),
+            },
         };
+        let scheme = &schemes[scheme_name];
         let endpoint = |key: &str| -> Result<String, String> {
             let value = flow
                 .get(key)
@@ -69,10 +84,10 @@ impl Provider {
                 .iter()
                 .find(|r| {
                     r.as_object()
-                        .is_some_and(|r| r.len() == 1 && r.contains_key(*scheme_name))
+                        .is_some_and(|r| r.len() == 1 && r.contains_key(scheme_name))
                 })
                 .ok_or("operation requires an unsupported authentication combination")?;
-            for scope in requirement[*scheme_name]
+            for scope in requirement[scheme_name]
                 .as_array()
                 .ok_or("invalid scope requirements")?
             {
@@ -103,6 +118,9 @@ impl Provider {
             authorization_url: endpoint("authorizationUrl")?,
             token_url: endpoint("tokenUrl")?,
             scopes: scopes.into_iter().collect(),
+            authorization_params: authorization_params(document, scheme)?,
+            use_pkce: pkce_behavior(scheme)?,
+            supported_client_auth: supported_client_auth(scheme)?,
         })
     }
 
@@ -115,6 +133,13 @@ impl Provider {
         let method = env::var(format!("{prefix}_CLIENT_AUTH_METHOD"))
             .unwrap_or_else(|_| "client_secret_post".into());
         let client_auth = ClientAuth::parse(&method)?;
+        if provider
+            .supported_client_auth
+            .as_ref()
+            .is_some_and(|supported| !supported.contains(client_auth.registered_name()))
+        {
+            return Err("configured client authentication method is not supported by the authorization server".into());
+        }
         let client_secret = if client_auth == ClientAuth::None {
             String::new()
         } else {
@@ -130,6 +155,217 @@ impl Provider {
     }
 }
 
+const RESERVED_AUTHORIZATION_PARAMETERS: &[&str] = &[
+    "client_id",
+    "client_secret",
+    "redirect_uri",
+    "response_type",
+    "scope",
+    "state",
+    "code",
+    "code_challenge",
+    "code_challenge_method",
+    "code_verifier",
+];
+
+fn authentication_details(scheme: &Value) -> Option<&Value> {
+    scheme.get("x-oauth-authentication-details")
+}
+
+fn supported_client_auth(scheme: &Value) -> Result<Option<BTreeSet<String>>, String> {
+    let Some(value) = authentication_details(scheme).and_then(|details| {
+        details.pointer("/authorizationServerMetadata/token_endpoint_auth_methods_supported")
+    }) else {
+        return Ok(None);
+    };
+    let methods = value
+        .as_array()
+        .ok_or("invalid token endpoint authentication methods")?;
+    if methods.is_empty() {
+        return Err("token endpoint authentication methods must not be empty".into());
+    }
+    methods
+        .iter()
+        .map(|method| {
+            method
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| "invalid token endpoint authentication method".into())
+        })
+        .collect::<Result<BTreeSet<_>, _>>()
+        .map(Some)
+}
+
+fn pkce_behavior(scheme: &Value) -> Result<bool, String> {
+    let Some(details) = authentication_details(scheme) else {
+        // Preserve the proxy's established secure behavior when metadata is absent.
+        return Ok(true);
+    };
+    let requirement = details
+        .pointer("/authorizationCode/pkce/requirement")
+        .and_then(Value::as_str);
+    if requirement == Some("unsupported") {
+        return Ok(false);
+    }
+    if !matches!(
+        requirement,
+        None | Some("required" | "optional" | "conditional")
+    ) {
+        return Err("invalid PKCE requirement".into());
+    }
+    let methods = details
+        .pointer("/authorizationServerMetadata/code_challenge_methods_supported")
+        .and_then(Value::as_array);
+    if requirement.is_some()
+        && !methods.is_some_and(|methods| methods.iter().any(|method| method == "S256"))
+    {
+        return Err(
+            "S256 is required by the proxy but is not supported by the authorization server".into(),
+        );
+    }
+    Ok(true)
+}
+
+fn authorization_params(document: &Value, scheme: &Value) -> Result<Vec<(String, String)>, String> {
+    let Some(parameters) = authentication_details(scheme)
+        .and_then(|details| details.pointer("/authorizationCode/profile/parameters"))
+    else {
+        return Ok(Vec::new());
+    };
+    let parameters = parameters
+        .as_array()
+        .ok_or("invalid authorization parameters")?;
+    let mut output = Vec::new();
+    let mut names = BTreeSet::new();
+    for entry in parameters {
+        let parameter = entry
+            .get("parameter")
+            .ok_or("missing authorization parameter")?;
+        let parameter = resolve_parameter(document, parameter)?;
+        let name = parameter
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or("authorization parameter has no name")?;
+        if parameter.get("in").and_then(Value::as_str) != Some("query")
+            || RESERVED_AUTHORIZATION_PARAMETERS.contains(&name)
+            || !names.insert(name.to_owned())
+        {
+            return Err("invalid or duplicate authorization query parameter".into());
+        }
+        let value = entry
+            .get("value")
+            .ok_or("authorization parameter has no value")?;
+        validate_schema(value, parameter.get("schema"))?;
+        serialize_parameter(name, value, parameter, &mut output)?;
+    }
+    Ok(output)
+}
+
+fn resolve_parameter<'a>(document: &'a Value, parameter: &'a Value) -> Result<&'a Value, String> {
+    let Some(reference) = parameter.get("$ref").and_then(Value::as_str) else {
+        return Ok(parameter);
+    };
+    let pointer = reference
+        .strip_prefix('#')
+        .ok_or("authorization parameter references must be local")?;
+    document
+        .pointer(pointer)
+        .ok_or_else(|| "authorization parameter reference does not resolve".into())
+}
+
+fn validate_schema(value: &Value, schema: Option<&Value>) -> Result<(), String> {
+    let Some(schema) = schema else {
+        return Err("authorization parameter schema is required".into());
+    };
+    let valid_type = match schema.get("type").and_then(Value::as_str) {
+        Some("string") => value.is_string(),
+        Some("boolean") => value.is_boolean(),
+        Some("integer") => value.as_i64().is_some() || value.as_u64().is_some(),
+        Some("number") => value.is_number(),
+        Some("array") => value.is_array(),
+        Some("object") => value.is_object(),
+        _ => false,
+    };
+    if !valid_type
+        || schema
+            .get("enum")
+            .and_then(Value::as_array)
+            .is_some_and(|values| !values.contains(value))
+    {
+        return Err("authorization parameter value does not match its schema".into());
+    }
+    Ok(())
+}
+
+fn scalar(value: &Value) -> Result<String, String> {
+    match value {
+        Value::String(value) => Ok(value.clone()),
+        Value::Bool(value) => Ok(value.to_string()),
+        Value::Number(value) => Ok(value.to_string()),
+        _ => Err("authorization parameter contains a non-scalar value".into()),
+    }
+}
+
+fn serialize_parameter(
+    name: &str,
+    value: &Value,
+    parameter: &Value,
+    output: &mut Vec<(String, String)>,
+) -> Result<(), String> {
+    let style = parameter
+        .get("style")
+        .and_then(Value::as_str)
+        .unwrap_or("form");
+    let explode = parameter
+        .get("explode")
+        .and_then(Value::as_bool)
+        .unwrap_or(style == "form");
+    match value {
+        Value::Array(values) => {
+            let values = values.iter().map(scalar).collect::<Result<Vec<_>, _>>()?;
+            if style == "form" && explode {
+                output.extend(values.into_iter().map(|value| (name.to_owned(), value)));
+            } else {
+                let delimiter = match style {
+                    "form" => ",",
+                    "spaceDelimited" => " ",
+                    "pipeDelimited" => "|",
+                    _ => return Err("unsupported authorization parameter serialization".into()),
+                };
+                output.push((name.to_owned(), values.join(delimiter)));
+            }
+        }
+        Value::Object(values) => {
+            if style == "deepObject" {
+                for (key, value) in values {
+                    output.push((format!("{name}[{key}]"), scalar(value)?));
+                }
+            } else if style == "form" && explode {
+                for (key, value) in values {
+                    if RESERVED_AUTHORIZATION_PARAMETERS.contains(&key.as_str()) {
+                        return Err(
+                            "authorization object parameter expands to a reserved name".into()
+                        );
+                    }
+                    output.push((key.clone(), scalar(value)?));
+                }
+            } else if style == "form" {
+                let mut flattened = Vec::new();
+                for (key, value) in values {
+                    flattened.push(key.clone());
+                    flattened.push(scalar(value)?);
+                }
+                output.push((name.to_owned(), flattened.join(",")));
+            } else {
+                return Err("unsupported authorization parameter serialization".into());
+            }
+        }
+        _ if style == "form" => output.push((name.to_owned(), scalar(value)?)),
+        _ => return Err("unsupported authorization parameter serialization".into()),
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClientAuth {
     None,
@@ -143,6 +379,13 @@ impl ClientAuth {
             "client_secret_post" => Ok(Self::SecretPost),
             "client_secret_basic" => Ok(Self::SecretBasic),
             _ => Err("unsupported client authentication method".into()),
+        }
+    }
+    fn registered_name(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::SecretPost => "client_secret_post",
+            Self::SecretBasic => "client_secret_basic",
         }
     }
 }
@@ -191,13 +434,19 @@ mod tests {
     fn required_scopes_follow_operation_overrides_without_requesting_all_supported_scopes() {
         let mut doc = document();
         assert_eq!(
-            Provider::from_document(&doc).unwrap().scopes,
+            Provider::from_document(&doc, None).unwrap().scopes,
             ["read", "write"]
         );
         doc["paths"]["/records"]["post"]["security"] = serde_json::json!([]);
-        assert_eq!(Provider::from_document(&doc).unwrap().scopes, ["read"]);
+        assert_eq!(
+            Provider::from_document(&doc, None).unwrap().scopes,
+            ["read"]
+        );
         doc["paths"]["/records"]["get"]["security"] = serde_json::json!([{}]);
-        assert!(Provider::from_document(&doc).unwrap().scopes.is_empty());
+        assert!(Provider::from_document(&doc, None)
+            .unwrap()
+            .scopes
+            .is_empty());
     }
     #[test]
     fn rejects_invalid_endpoints_ambiguous_schemes_and_unknown_scopes() {
@@ -209,15 +458,80 @@ mod tests {
             let mut doc = document();
             doc["components"]["securitySchemes"]["auth"]["flows"]["authorizationCode"]
                 ["tokenUrl"] = endpoint.into();
-            assert!(Provider::from_document(&doc).is_err());
+            assert!(Provider::from_document(&doc, None).is_err());
         }
         let mut doc = document();
         doc["security"] = serde_json::json!([{"auth":["undeclared"]}]);
-        assert!(Provider::from_document(&doc).is_err());
+        assert!(Provider::from_document(&doc, None).is_err());
         let mut doc = document();
         doc["components"]["securitySchemes"]["second"] =
             doc["components"]["securitySchemes"]["auth"].clone();
-        assert!(Provider::from_document(&doc).is_err());
+        assert!(Provider::from_document(&doc, None).is_err());
+    }
+    #[test]
+    fn trusted_scheme_selection_applies_fixed_parameters_and_pkce_capability() {
+        let mut doc = document();
+        doc["components"]["parameters"] = serde_json::json!({
+            "accessType": {
+                "name": "access_type", "in": "query",
+                "schema": {"type": "string", "enum": ["online", "offline"]}
+            },
+            "audience": {
+                "name": "audience", "in": "query", "style": "form", "explode": true,
+                "schema": {"type": "array", "items": {"type": "string"}}
+            }
+        });
+        let mut offline = doc["components"]["securitySchemes"]["auth"].clone();
+        offline["x-oauth-authentication-details"] = serde_json::json!({
+            "authorizationServerMetadata": {
+                "token_endpoint_auth_methods_supported": ["client_secret_post"],
+            },
+            "authorizationCode": {
+                "pkce": {"requirement": "unsupported"},
+                "profile": {"parameters": [
+                    {"parameter": {"$ref": "#/components/parameters/accessType"}, "value": "offline"},
+                    {"parameter": {"$ref": "#/components/parameters/audience"}, "value": ["one", "two"]}
+                ]}
+            }
+        });
+        doc["components"]["securitySchemes"]["offline"] = offline;
+        doc["security"] = serde_json::json!([{"offline":["read"]}]);
+        doc["paths"]["/records"]["post"]["security"] = serde_json::json!([{"offline":["write"]}]);
+        let provider = Provider::from_document(&doc, Some("offline")).unwrap();
+        assert_eq!(
+            provider.authorization_params,
+            [
+                ("access_type".into(), "offline".into()),
+                ("audience".into(), "one".into()),
+                ("audience".into(), "two".into())
+            ]
+        );
+        assert!(!provider.use_pkce);
+        assert_eq!(
+            provider.supported_client_auth.unwrap(),
+            BTreeSet::from(["client_secret_post".into()])
+        );
+        assert!(Provider::from_document(&doc, None).is_err());
+        assert!(Provider::from_document(&doc, Some("missing")).is_err());
+    }
+    #[test]
+    fn rejects_reserved_fixed_parameters_and_incompatible_pkce_metadata() {
+        let mut doc = document();
+        doc["components"]["securitySchemes"]["auth"]["x-oauth-authentication-details"] = serde_json::json!({
+            "authorizationCode": {
+                "profile": {"parameters": [{
+                    "parameter": {"name": "code_verifier", "in": "query", "schema": {"type": "string"}},
+                    "value": "fixed"
+                }]}
+            }
+        });
+        assert!(Provider::from_document(&doc, None).is_err());
+
+        doc["components"]["securitySchemes"]["auth"]["x-oauth-authentication-details"] = serde_json::json!({
+            "authorizationServerMetadata": {"code_challenge_methods_supported": ["plain"]},
+            "authorizationCode": {"pkce": {"requirement": "required"}}
+        });
+        assert!(Provider::from_document(&doc, None).is_err());
     }
     #[test]
     fn client_registration_selects_token_authentication_for_exchange_and_refresh() {
@@ -228,7 +542,7 @@ mod tests {
             ClientAuth::SecretBasic,
         ] {
             let provider = ConfiguredProvider {
-                provider: Provider::from_document(&document()).unwrap(),
+                provider: Provider::from_document(&document(), None).unwrap(),
                 client_id: "client:id".into(),
                 client_secret: "secret+value".into(),
                 client_auth: client_auth.clone(),

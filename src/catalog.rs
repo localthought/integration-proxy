@@ -130,7 +130,12 @@ impl Catalog {
     pub fn oauth_provider(&self, platform: &str) -> Result<crate::providers::Provider, String> {
         let source = self.get(platform).ok_or("unknown catalog platform")?;
         let document = serde_yaml::from_str(source).map_err(|_| "invalid catalog document")?;
-        crate::providers::Provider::from_document(&document)
+        let scheme = self
+            .selections
+            .get(platform)
+            .and_then(|selection| selection.get("oauthSecurityScheme"))
+            .and_then(Value::as_str);
+        crate::providers::Provider::from_document(&document, scheme)
     }
     fn get(&self, platform: &str) -> Option<&str> {
         self.documents.get(platform).map(String::as_str)
