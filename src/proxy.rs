@@ -236,16 +236,14 @@ async fn refresh_if_needed(state: &AppState, credential: &mut Credential) -> Res
     }
     let refresh_token = credential.refresh_token.as_deref().ok_or(())?;
     let provider = crate::providers::Provider::configured(&credential.provider).map_err(|_| ())?;
-    let response = state
-        .http_client
-        .post(provider.provider.token_url)
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("refresh_token", refresh_token),
-            ("client_id", &provider.client_id),
-            ("client_secret", &provider.client_secret),
-        ])
-        .header("accept", "application/json")
+    let response = provider
+        .token_request(
+            &state.http_client,
+            &[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", refresh_token),
+            ],
+        )
         .send()
         .await
         .map_err(|_| ())?

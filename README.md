@@ -105,6 +105,17 @@ available, and rotates the handoff code after every request.
 
 ## Catalog
 
+Spotify uses `OAUTH_SPOTIFY_CLIENT_ID` and the callback
+`https://localthought.io/oauth/spotify/callback` in production. Register a
+Spotify Web API app with that exact redirect URI. The integration uses
+Authorization Code with PKCE, so no client secret is required or transmitted.
+It imports playlists with `playlist-read-private` and
+`playlist-read-collaborative`; no write scopes are requested. No account ID
+parameter is needed. Development-mode access is subject to Spotify's Premium
+and app-user allowlist requirements. Access tokens refresh automatically;
+expired or revoked refresh tokens require reconnecting through OAuth.
+
+
 Moneybird uses `OAUTH_MONEYBIRD_CLIENT_ID` and
 `OAUTH_MONEYBIRD_CLIENT_SECRET`, with callback
 `https://localthought.io/oauth/moneybird/callback` in production. Register an

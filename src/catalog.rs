@@ -332,6 +332,32 @@ mod tests {
             .allows("moneybird", "GET", "/api/v20/123/contacts.json")
             .is_none());
     }
+    #[tokio::test]
+    #[ignore = "downloads the pinned production catalog sources"]
+    async fn pinned_spotify_catalog_composes_and_allows_readonly_playlists() {
+        let catalog = Catalog::load("catalog.yaml", &crate::build_http_client())
+            .await
+            .unwrap();
+        let document: Value = serde_yaml::from_str(catalog.get("spotify").unwrap()).unwrap();
+        assert!(document
+            .pointer("/components/crudResources")
+            .unwrap()
+            .as_object()
+            .is_some_and(|resources| !resources.is_empty()));
+        assert_eq!(
+            catalog
+                .allows("spotify", "GET", "/v1/me/playlists")
+                .unwrap()
+                .as_str(),
+            "https://api.spotify.com/v1"
+        );
+        assert!(catalog
+            .allows("spotify", "POST", "/v1/me/playlists")
+            .is_none());
+        assert!(catalog.allows("spotify", "GET", "/me/playlists").is_none());
+        assert!(catalog.allows("spotify", "GET", "/v1/me/tracks").is_none());
+    }
+
     #[test]
     fn validates_google_endpoints_relative_to_server_base_path() {
         for server in [

@@ -26,3 +26,9 @@ platforms:
       - https://raw.githubusercontent.com/localthought/overlays/a53c7e859433678d662d7b95a02c7ac29b553928/todoist.com/api/v1/auth-overlay.yaml
       - https://raw.githubusercontent.com/localthought/overlays/a53c7e859433678d662d7b95a02c7ac29b553928/todoist.com/api/v1/pagination-overlay.yaml
       - https://raw.githubusercontent.com/localthought/overlays/a53c7e859433678d662d7b95a02c7ac29b553928/todoist.com/api/v1/crud-causality-overlay.yaml
+  - name: spotify
+    openapi: https://raw.githubusercontent.com/localthought/openapi-directory/2914e6bed4db4389921b36e4ed79e645c2085668/APIs/spotify.com/1.0.0-readonly/openapi.yaml
+    overlays:
+      - https://raw.githubusercontent.com/localthought/overlays/2b6e05249a1e903ea1297423b1be202319e389b7/spotify.com/1.0.0-readonly/auth-overlay.yaml
+      - https://raw.githubusercontent.com/localthought/overlays/2b6e05249a1e903ea1297423b1be202319e389b7/spotify.com/1.0.0-readonly/pagination-overlay.yaml
+      - https://raw.githubusercontent.com/localthought/overlays/2b6e05249a1e903ea1297423b1be202319e389b7/spotify.com/1.0.0-readonly/crud-causality-overlay.yaml

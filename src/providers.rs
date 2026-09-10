@@ -16,8 +16,12 @@ impl Provider {
         let prefix = Config::provider_env_prefix(name)?;
         let client_id = env::var(format!("{prefix}_CLIENT_ID"))
             .map_err(|_| format!("{prefix}_CLIENT_ID must be set"))?;
-        let client_secret = env::var(format!("{prefix}_CLIENT_SECRET"))
-            .map_err(|_| format!("{prefix}_CLIENT_SECRET must be set"))?;
+        let client_secret = if name == "spotify" {
+            String::new()
+        } else {
+            env::var(format!("{prefix}_CLIENT_SECRET"))
+                .map_err(|_| format!("{prefix}_CLIENT_SECRET must be set"))?
+        };
         Ok(ConfiguredProvider {
             provider,
             client_id,
@@ -31,6 +35,26 @@ pub struct ConfiguredProvider {
     pub provider: Provider,
     pub client_id: String,
     pub client_secret: String,
+}
+
+impl ConfiguredProvider {
+    /// Spotify uses the PKCE flow: client_id and verifier, without a secret.
+    /// Keep the existing form authentication for the other providers.
+    pub fn token_request(
+        &self,
+        client: &reqwest::Client,
+        params: &[(&str, &str)],
+    ) -> reqwest::RequestBuilder {
+        let mut form = params.to_vec();
+        form.push(("client_id", self.client_id.as_str()));
+        if self.provider.name != "spotify" {
+            form.push(("client_secret", self.client_secret.as_str()));
+        }
+        client
+            .post(self.provider.token_url)
+            .form(&form)
+            .header("accept", "application/json")
+    }
 }
 
 pub fn known(name: &str) -> Option<Provider> {
@@ -49,6 +73,12 @@ pub fn known(name: &str) -> Option<Provider> {
             authorization_url: "https://github.com/login/oauth/authorize",
             token_url: "https://github.com/login/oauth/access_token",
             scopes: &["repo"],
+        }),
+        "spotify" => Some(Provider {
+            name: "spotify",
+            authorization_url: "https://accounts.spotify.com/authorize",
+            token_url: "https://accounts.spotify.com/api/token",
+            scopes: &["playlist-read-private", "playlist-read-collaborative"],
         }),
         "moneybird" => Some(Provider {
             name: "moneybird",
@@ -86,6 +116,73 @@ mod tests {
             Config::provider_env_prefix(provider.name).unwrap(),
             "OAUTH_TODOIST"
         );
+    }
+
+    #[test]
+    fn spotify_pkce_exchange_and_refresh_do_not_send_client_secret() {
+        let provider = ConfiguredProvider {
+            provider: known("spotify").unwrap(),
+            client_id: "test-client".into(),
+            client_secret: "must-not-be-sent".into(),
+        };
+        assert_eq!(
+            provider.provider.authorization_url,
+            "https://accounts.spotify.com/authorize"
+        );
+        assert_eq!(
+            provider.provider.scopes,
+            ["playlist-read-private", "playlist-read-collaborative"]
+        );
+        assert_eq!(
+            Config::provider_env_prefix("spotify").unwrap(),
+            "OAUTH_SPOTIFY"
+        );
+        for params in [
+            vec![
+                ("grant_type", "authorization_code"),
+                ("code", "test-code"),
+                ("code_verifier", "test-verifier"),
+            ],
+            vec![
+                ("grant_type", "refresh_token"),
+                ("refresh_token", "test-refresh"),
+            ],
+        ] {
+            let request = provider
+                .token_request(&reqwest::Client::new(), &params)
+                .build()
+                .unwrap();
+            assert_eq!(
+                request.url().as_str(),
+                "https://accounts.spotify.com/api/token"
+            );
+            let body = request.body().unwrap().as_bytes().unwrap();
+            let form: std::collections::HashMap<_, _> =
+                url::form_urlencoded::parse(body).into_owned().collect();
+            assert_eq!(form.get("client_id").unwrap(), "test-client");
+            assert!(!form.contains_key("client_secret"));
+            for (key, value) in params {
+                assert_eq!(form.get(key).unwrap(), value);
+            }
+        }
+    }
+
+    #[test]
+    fn existing_providers_keep_form_client_authentication() {
+        let provider = ConfiguredProvider {
+            provider: known("moneybird").unwrap(),
+            client_id: "test-client".into(),
+            client_secret: "test-secret".into(),
+        };
+        let request = provider
+            .token_request(&reqwest::Client::new(), &[("grant_type", "refresh_token")])
+            .build()
+            .unwrap();
+        let form: std::collections::HashMap<_, _> =
+            url::form_urlencoded::parse(request.body().unwrap().as_bytes().unwrap())
+                .into_owned()
+                .collect();
+        assert_eq!(form.get("client_secret").unwrap(), "test-secret");
     }
 
     #[test]
