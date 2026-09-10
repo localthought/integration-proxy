@@ -49,10 +49,12 @@ impl Catalog {
     }
 
     pub async fn load(path: &str, client: &reqwest::Client) -> Result<Self, String> {
-        let config: CatalogConfig = serde_yaml::from_str(
-            &fs::read_to_string(path).map_err(|err| format!("cannot read {path}: {err}"))?,
-        )
-        .map_err(|err| format!("cannot parse {path}: {err}"))?;
+        let source = if path.starts_with("https://") {
+            fetch_yaml(client, path).await?
+        } else {
+            fs::read_to_string(path).map_err(|err| format!("cannot read {path}: {err}"))?
+        };
+        let config = parse_catalog_config(&source, path)?;
         let mut documents = BTreeMap::new();
 
         for platform in config.platforms {
@@ -69,10 +71,11 @@ impl Catalog {
                     merge_at_target(&mut document, &action.target, action.update)?;
                 }
             }
-            documents.insert(
-                platform.name,
+            insert_document(
+                &mut documents,
+                &platform.name,
                 serde_yaml::to_string(&document).map_err(|err| err.to_string())?,
-            );
+            )?;
         }
         Ok(Self { documents })
     }
@@ -111,6 +114,21 @@ impl Catalog {
     fn get(&self, platform: &str) -> Option<&str> {
         self.documents.get(platform).map(String::as_str)
     }
+}
+
+fn parse_catalog_config(source: &str, path: &str) -> Result<CatalogConfig, String> {
+    serde_yaml::from_str(source).map_err(|err| format!("cannot parse {path}: {err}"))
+}
+
+fn insert_document(
+    documents: &mut BTreeMap<String, String>,
+    name: &str,
+    document: String,
+) -> Result<(), String> {
+    if documents.insert(name.to_string(), document).is_some() {
+        return Err(format!("duplicate platform name {name:?}"));
+    }
+    Ok(())
 }
 
 fn path_matches(template: &str, path: &str) -> bool {
@@ -251,7 +269,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "downloads the pinned production catalog sources"]
     async fn pinned_todoist_catalog_is_read_only_and_preserves_api_prefix() {
-        let catalog = Catalog::load("catalog.yaml", &crate::build_http_client())
+        let catalog = Catalog::load("https://raw.githubusercontent.com/localthought/overlays/46372f131bed8de8efec9519bb3527d737c74ee9/catalog.json", &crate::build_http_client())
             .await
             .unwrap();
         let document: Value = serde_yaml::from_str(catalog.get("todoist").unwrap()).unwrap();
@@ -289,7 +307,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "downloads the pinned production catalog sources"]
     async fn pinned_discord_catalog_composes_and_allows_only_user_reads() {
-        let catalog = Catalog::load("catalog.yaml", &crate::build_http_client())
+        let catalog = Catalog::load("https://raw.githubusercontent.com/localthought/overlays/46372f131bed8de8efec9519bb3527d737c74ee9/catalog.json", &crate::build_http_client())
             .await
             .unwrap();
         let document: Value = serde_yaml::from_str(catalog.get("discord").unwrap()).unwrap();
@@ -353,7 +371,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "downloads the pinned production catalog sources"]
     async fn pinned_moneybird_catalog_composes_and_allows_contacts() {
-        let catalog = Catalog::load("catalog.yaml", &crate::build_http_client())
+        let catalog = Catalog::load("https://raw.githubusercontent.com/localthought/overlays/46372f131bed8de8efec9519bb3527d737c74ee9/catalog.json", &crate::build_http_client())
             .await
             .unwrap();
         assert!(catalog.names().contains(&"moneybird".to_string()));
@@ -389,7 +407,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "downloads the pinned production catalog sources"]
     async fn pinned_spotify_catalog_composes_and_allows_readonly_playlists() {
-        let catalog = Catalog::load("catalog.yaml", &crate::build_http_client())
+        let catalog = Catalog::load("https://raw.githubusercontent.com/localthought/overlays/46372f131bed8de8efec9519bb3527d737c74ee9/catalog.json", &crate::build_http_client())
             .await
             .unwrap();
         let document: Value = serde_yaml::from_str(catalog.get("spotify").unwrap()).unwrap();
@@ -460,7 +478,10 @@ mod tests {
     use tower::ServiceExt;
 
     fn test_router() -> axum::Router {
-        let config: CatalogConfig = serde_yaml::from_str(include_str!("../catalog.yaml")).unwrap();
+        let config: CatalogConfig = serde_yaml::from_str(
+            "platforms:\n  - { name: github-issues, openapi: https://example.com/github.yaml }\n  - { name: google-calendar, openapi: https://example.com/google.yaml }\n  - { name: moneybird, openapi: https://example.com/moneybird.yaml }\n  - { name: todoist, openapi: https://example.com/todoist.yaml }\n  - { name: spotify, openapi: https://example.com/spotify.yaml }\n  - { name: discord, openapi: https://example.com/discord.yaml }\n",
+        )
+        .unwrap();
         let documents = config
             .platforms
             .into_iter()
@@ -569,6 +590,27 @@ mod tests {
         assert_eq!(
             document["components"]["securitySchemes"]["token"]["type"],
             "http"
+        );
+    }
+
+    #[test]
+    fn catalog_config_accepts_json_fixture_and_rejects_invalid_names() {
+        let config = parse_catalog_config(
+            r#"{"platforms":[{"name":"example","openapi":"https://example.com/oad.json"}]}"#,
+            "fixture.json",
+        )
+        .unwrap();
+        assert_eq!(config.platforms[0].name, "example");
+        assert!(valid_platform_name("bad_name").is_err());
+    }
+
+    #[test]
+    fn catalog_rejects_duplicate_platform_names() {
+        let mut documents = BTreeMap::new();
+        insert_document(&mut documents, "example", "{}".to_string()).unwrap();
+        assert_eq!(
+            insert_document(&mut documents, "example", "{}".to_string()).unwrap_err(),
+            "duplicate platform name \"example\""
         );
     }
 }
