@@ -337,7 +337,7 @@ mod tests {
     #[ignore = "downloads pinned OAuth authentication-details metadata"]
     async fn pinned_catalog_selects_google_offline_and_spotify_pkce_profiles() {
         let catalog = Catalog::load(
-            "https://raw.githubusercontent.com/localthought/overlays/74f31ba8ec2659e9452092b730c31865b6a86fdc/catalog.json",
+            "https://raw.githubusercontent.com/localthought/overlays/d83c3ce0afd9f8ca0e4c42e142fa89d5fa9d8f70/catalog.json",
             &crate::build_http_client(),
         )
         .await

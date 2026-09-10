@@ -139,11 +139,15 @@ one pinned OpenAPI document and zero or more pinned Overlay Specification
 documents. At startup the proxy downloads those HTTPS sources, applies each
 overlay's `update` actions, and keeps the resulting YAML in memory.
 
-A catalog entry may also contain a `selection` object with consumer query
-choices. `GET /catalog/{platform}.selection.json` returns that object (or `{}`
-when absent). It remains separate from the composed OpenAPI document: choosing
-to include archived records is client configuration, not an API default. The
-proxy passes this configuration through and does not interpret its fields.
+A catalog entry may also contain a **selection** object. Consumer
+**query_overrides** remain separate from the composed OpenAPI document:
+choosing to include archived records is client configuration, not an API
+default. The proxy passes those choices through.
+**selection.oauthSecurityScheme** is trusted server configuration: when a
+document contains multiple OAuth authorization-code Security Schemes, it names
+the one the proxy uses. The value must be a string naming a declared scheme.
+**GET /catalog/{platform}.selection.json** returns the selection object (or an
+empty object when absent).
 
 Publish catalog changes in this order: publish and verify the immutable OAD and
 overlay pins, commit the root `catalog.json`, then update the proxy's pinned
@@ -233,8 +237,33 @@ CI provides PostgreSQL and includes the database tests. Coverage includes concur
 
 ### OAuth client registration
 
-Integration authorization and token endpoints and required scopes are read from the composed OpenAPI catalog. A platform must have exactly one OAuth authorization-code security scheme. Scopes are taken from operation security requirements (falling back to root requirements), not every scope supported by the server. Public operations require no scopes; unsupported authentication combinations fail closed.
+Integration authorization and token endpoints and required scopes are read
+from the composed OpenAPI catalog. A platform with one OAuth
+authorization-code Security Scheme uses it directly. A platform with multiple
+such schemes must set the catalog's trusted
+**selection.oauthSecurityScheme**; missing, non-string, or unknown selections
+fail closed. Requests cannot select a scheme or supply endpoints. Scopes are
+taken from operation security requirements (falling back to root
+requirements), not every scope supported by the server. Public operations
+require no scopes; unsupported authentication combinations fail closed.
 
-`OAUTH_<PLATFORM>_CLIENT_AUTH_METHOD` selects the method registered for this client: `none`, `client_secret_post` (default), or `client_secret_basic`. Public clients use `none` and do not load or send a secret. Confidential clients require the corresponding `_CLIENT_SECRET`. This setting describes the client registration, not server-supported capabilities. Authorization uses S256 PKCE. Server capability extensions remain subject to the separate OpenAPI extension discussions.
+`OAUTH_<PLATFORM>_CLIENT_AUTH_METHOD` selects the method registered for this client: `none`, `client_secret_post` (default), or `client_secret_basic`. Public clients use `none` and do not load or send a secret. Confidential clients require the corresponding `_CLIENT_SECRET`. This setting describes the client registration, not server-supported capabilities. Authorization uses S256 PKCE unless trusted metadata explicitly declares PKCE unsupported.
+
+The proxy implements a bounded subset of
+**x-oauth-authentication-details**. It reads inline
+**token_endpoint_auth_methods_supported**,
+**code_challenge_methods_supported**, PKCE requirements, and fixed
+authorization profile parameters. Parameter references must be local. Schema
+validation supports **type**, **enum**, recursive **items**, **properties**,
+**required**, and **additionalProperties**; other validation keywords fail
+closed. Serialization supports scalar form values, form/space/pipe-delimited
+scalar arrays, and form/deep-object scalar objects. Reserved OAuth fields and
+query-name collisions are rejected.
+
+The proxy does not fetch **oauth2MetadataUrl** and does not interpret
+**tokenEndpointOperation** or **refreshEndpointOperation**. A selected scheme
+that contains any of those fields is rejected, because discovery or a
+separately described operation could require different token-request
+authentication or wire behavior.
 
 When upgrading the previous deployment, copy its application-login client ID/secret to `APP_AUTH_CLIENT_ID` / `APP_AUTH_CLIENT_SECRET` and configure the same authorization, token, and userinfo endpoints before deploying. Keep the identity issuer stable: tenant identities are derived from its subject identifiers. Set the existing public PKCE client's `_CLIENT_AUTH_METHOD=none`. Existing credential envelopes, handoffs, callbacks, and provider credential variable names remain valid. Browser login sessions created by the earlier session schema require sign-in again.

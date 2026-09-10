@@ -44,6 +44,7 @@ impl Provider {
             },
         };
         let scheme = &schemes[scheme_name];
+        validate_supported_authentication_details(scheme)?;
         let endpoint = |key: &str| -> Result<String, String> {
             let value = flow
                 .get(key)
@@ -173,6 +174,24 @@ const RESERVED_AUTHORIZATION_PARAMETERS: &[&str] = &[
 
 fn authentication_details(scheme: &Value) -> Option<&Value> {
     scheme.get("x-oauth-authentication-details")
+}
+
+fn validate_supported_authentication_details(scheme: &Value) -> Result<(), String> {
+    if scheme.get("oauth2MetadataUrl").is_some() {
+        return Err("oauth2MetadataUrl discovery is not supported by this proxy".into());
+    }
+    let Some(details) = authentication_details(scheme) else {
+        return Ok(());
+    };
+    let details = details
+        .as_object()
+        .ok_or("OAuth authentication details must be an object")?;
+    for unsupported in ["tokenEndpointOperation", "refreshEndpointOperation"] {
+        if details.contains_key(unsupported) {
+            return Err(format!("{unsupported} is not supported by this proxy"));
+        }
+    }
+    Ok(())
 }
 
 fn supported_client_auth(scheme: &Value) -> Result<Option<BTreeSet<String>>, String> {
@@ -740,6 +759,21 @@ mod tests {
             "value":["not-an-integer"]
         }]}}});
         assert!(Provider::from_document(&doc, None).is_err());
+    }
+
+    #[test]
+    fn rejects_unimplemented_discovery_and_token_operation_semantics() {
+        let mut doc = document();
+        doc["components"]["securitySchemes"]["auth"]["oauth2MetadataUrl"] =
+            "https://auth.example/.well-known/oauth-authorization-server".into();
+        assert!(Provider::from_document(&doc, None).is_err());
+
+        for field in ["tokenEndpointOperation", "refreshEndpointOperation"] {
+            let mut doc = document();
+            doc["components"]["securitySchemes"]["auth"]["x-oauth-authentication-details"] =
+                serde_json::json!({(field): "#/paths/~1token/post"});
+            assert!(Provider::from_document(&doc, None).is_err(), "{field}");
+        }
     }
     #[test]
     fn client_registration_selects_token_authentication_for_exchange_and_refresh() {

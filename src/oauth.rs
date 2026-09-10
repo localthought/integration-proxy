@@ -153,71 +153,6 @@ pub async fn begin(
     Ok(url.into())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn document(requirement: &str) -> serde_json::Value {
-        let mut document = serde_json::json!({
-            "components": {
-                "parameters": {"accessType": {
-                    "name": "access_type", "in": "query",
-                    "schema": {"type": "string", "enum": ["offline"]}
-                }},
-                "securitySchemes": {"auth": {
-                    "type": "oauth2",
-                    "x-oauth-authentication-details": {
-                        "authorizationServerMetadata": {
-                            "code_challenge_methods_supported": ["S256"]
-                        },
-                        "authorizationCode": {
-                            "pkce": {"requirement": requirement},
-                            "profile": {"parameters": [{
-                                "parameter": {"$ref": "#/components/parameters/accessType"},
-                                "value": "offline"
-                            }]}
-                        }
-                    },
-                    "flows": {"authorizationCode": {
-                        "authorizationUrl": "https://auth.example/authorize",
-                        "tokenUrl": "https://auth.example/token",
-                        "scopes": {"read": "Read"}
-                    }}
-                }}
-            },
-            "security": [{"auth": ["read"]}],
-            "paths": {}
-        });
-        if requirement == "unsupported" {
-            document["components"]["securitySchemes"]["auth"]["x-oauth-authentication-details"]
-                ["authorizationServerMetadata"]
-                .as_object_mut()
-                .unwrap()
-                .remove("code_challenge_methods_supported");
-        }
-        document
-    }
-
-    #[test]
-    fn authorization_details_add_trusted_profile_values_and_only_supported_pkce() {
-        for (requirement, expects_pkce) in [("required", true), ("unsupported", false)] {
-            let provider = Provider::from_document(&document(requirement), None).unwrap();
-            let mut url = Url::parse(&provider.authorization_url).unwrap();
-            append_provider_authorization(&mut url, &provider, "challenge");
-            let pairs: Vec<_> = url.query_pairs().into_owned().collect();
-            assert!(pairs.contains(&("access_type".into(), "offline".into())));
-            assert_eq!(
-                pairs.iter().any(|(key, _)| key == "code_challenge"),
-                expects_pkce
-            );
-            assert_eq!(
-                pairs.iter().any(|(key, _)| key == "code_challenge_method"),
-                expects_pkce
-            );
-        }
-    }
-}
-
 pub async fn callback(
     Path(name): Path<String>,
     State(state): State<AppState>,
@@ -356,4 +291,69 @@ async fn callback_response(
         Redirect::to(redirect.as_str()),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn document(requirement: &str) -> serde_json::Value {
+        let mut document = serde_json::json!({
+            "components": {
+                "parameters": {"accessType": {
+                    "name": "access_type", "in": "query",
+                    "schema": {"type": "string", "enum": ["offline"]}
+                }},
+                "securitySchemes": {"auth": {
+                    "type": "oauth2",
+                    "x-oauth-authentication-details": {
+                        "authorizationServerMetadata": {
+                            "code_challenge_methods_supported": ["S256"]
+                        },
+                        "authorizationCode": {
+                            "pkce": {"requirement": requirement},
+                            "profile": {"parameters": [{
+                                "parameter": {"$ref": "#/components/parameters/accessType"},
+                                "value": "offline"
+                            }]}
+                        }
+                    },
+                    "flows": {"authorizationCode": {
+                        "authorizationUrl": "https://auth.example/authorize",
+                        "tokenUrl": "https://auth.example/token",
+                        "scopes": {"read": "Read"}
+                    }}
+                }}
+            },
+            "security": [{"auth": ["read"]}],
+            "paths": {}
+        });
+        if requirement == "unsupported" {
+            document["components"]["securitySchemes"]["auth"]["x-oauth-authentication-details"]
+                ["authorizationServerMetadata"]
+                .as_object_mut()
+                .unwrap()
+                .remove("code_challenge_methods_supported");
+        }
+        document
+    }
+
+    #[test]
+    fn authorization_details_add_trusted_profile_values_and_only_supported_pkce() {
+        for (requirement, expects_pkce) in [("required", true), ("unsupported", false)] {
+            let provider = Provider::from_document(&document(requirement), None).unwrap();
+            let mut url = Url::parse(&provider.authorization_url).unwrap();
+            append_provider_authorization(&mut url, &provider, "challenge");
+            let pairs: Vec<_> = url.query_pairs().into_owned().collect();
+            assert!(pairs.contains(&("access_type".into(), "offline".into())));
+            assert_eq!(
+                pairs.iter().any(|(key, _)| key == "code_challenge"),
+                expects_pkce
+            );
+            assert_eq!(
+                pairs.iter().any(|(key, _)| key == "code_challenge_method"),
+                expects_pkce
+            );
+        }
+    }
 }
