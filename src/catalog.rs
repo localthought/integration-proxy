@@ -14,6 +14,7 @@ use crate::AppState;
 #[derive(Clone, Default)]
 pub struct Catalog {
     documents: BTreeMap<String, String>,
+    selections: BTreeMap<String, Value>,
 }
 
 #[derive(Deserialize)]
@@ -27,6 +28,8 @@ struct PlatformConfig {
     openapi: String,
     #[serde(default)]
     overlays: Vec<String>,
+    #[serde(default)]
+    selection: Option<serde_json::Map<String, Value>>,
 }
 
 #[derive(Deserialize)]
@@ -50,6 +53,7 @@ impl Catalog {
                     "tokenUrl": "https://auth.example/token", "scopes": {"read": "Read records"}}
                 }}}}, "security": [{"fixture": ["read"]}], "paths": {"/records": {"get": {}}}
             }).to_string())].into(),
+            ..Self::default()
         }
     }
 
@@ -61,6 +65,7 @@ impl Catalog {
         };
         let config = parse_catalog_config(&source, path)?;
         let mut documents = BTreeMap::new();
+        let mut selections = BTreeMap::new();
 
         for platform in config.platforms {
             valid_platform_name(&platform.name)?;
@@ -76,13 +81,19 @@ impl Catalog {
                     merge_at_target(&mut document, &action.target, action.update)?;
                 }
             }
+            if let Some(selection) = platform.selection {
+                selections.insert(platform.name.clone(), Value::Object(selection));
+            }
             insert_document(
                 &mut documents,
                 &platform.name,
                 serde_yaml::to_string(&document).map_err(|err| err.to_string())?,
             )?;
         }
-        Ok(Self { documents })
+        Ok(Self {
+            documents,
+            selections,
+        })
     }
 
     pub fn names(&self) -> Vec<String> {
@@ -259,6 +270,20 @@ pub async fn list(State(state): State<AppState>) -> Json<Vec<String>> {
 }
 
 pub async fn document(Path(file): Path<String>, State(state): State<AppState>) -> Response {
+    if let Some(platform) = file.strip_suffix(".selection.json") {
+        if state.catalog.get(platform).is_none() {
+            return (StatusCode::NOT_FOUND, "catalog platform not found").into_response();
+        }
+        return Json(
+            state
+                .catalog
+                .selections
+                .get(platform)
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({})),
+        )
+        .into_response();
+    }
     let Some(platform) = file.strip_suffix(".yaml") else {
         return (StatusCode::NOT_FOUND, "catalog platform not found").into_response();
     };
@@ -365,7 +390,7 @@ mod tests {
     #[test]
     fn discord_only_allows_profile_and_membership_reads_with_api_prefix() {
         let catalog = Catalog { documents: BTreeMap::from([("discord".into(),
-            "servers:\n  - url: https://discord.com/api/v10\npaths:\n  /users/@me:\n    get: {}\n  /users/@me/guilds:\n    get: {}\n".into())]) };
+            "servers:\n  - url: https://discord.com/api/v10\npaths:\n  /users/@me:\n    get: {}\n  /users/@me/guilds:\n    get: {}\n".into())]), ..Catalog::default() };
         for path in ["/api/v10/users/@me", "/api/v10/users/@me/guilds"] {
             assert_eq!(
                 catalog.allows("discord", "GET", path).unwrap().as_str(),
@@ -469,7 +494,7 @@ mod tests {
             "https://www.googleapis.com/calendar/v3",
             "https://www.googleapis.com/calendar/v3/",
         ] {
-            let catalog = Catalog { documents: BTreeMap::from([("google-calendar".into(), format!("servers:\n  - url: {server}\npaths:\n  /users/me/calendarList:\n    get: {{}}\n  /calendars/{{calendarId}}/events:\n    get: {{}}\n"))]) };
+            let catalog = Catalog { documents: BTreeMap::from([("google-calendar".into(), format!("servers:\n  - url: {server}\npaths:\n  /users/me/calendarList:\n    get: {{}}\n  /calendars/{{calendarId}}/events:\n    get: {{}}\n"))]), ..Catalog::default() };
             assert!(catalog
                 .allows(
                     "google-calendar",
@@ -538,7 +563,7 @@ mod tests {
             key: axum_extra::extract::cookie::Key::generate(),
             server_secret: "test".into(),
             base_url: "http://localhost".into(),
-            catalog: Catalog { documents },
+            catalog: Catalog { documents, selections: [("moneybird".into(), serde_json::json!({"query_overrides": [{"path":"/records", "values":{"include_archived":true}}]}))].into() },
             security: None,
         })
     }
@@ -587,6 +612,64 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), StatusCode::NOT_FOUND);
         }
+    }
+
+    #[tokio::test]
+    async fn consumer_selection_is_separate_from_api_metadata() {
+        let app = test_router();
+        for (name, expected) in [
+            (
+                "moneybird",
+                serde_json::json!({"query_overrides":[{"path":"/records","values":{"include_archived":true}}]}),
+            ),
+            ("github-issues", serde_json::json!({})),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/catalog/{name}.selection.json"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let value: Value =
+                serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                    .unwrap();
+            assert_eq!(value, expected);
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/catalog/{name}.yaml"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let document: Value =
+                serde_yaml::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                    .unwrap();
+            assert!(document.get("selection").is_none());
+            assert!(document.get("query_overrides").is_none());
+        }
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/catalog/unknown.selection.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert!(parse_catalog_config(
+            r#"{"platforms":[{"name":"example","openapi":"https://example.com","selection":[]}]}"#,
+            "fixture"
+        )
+        .is_err());
     }
 
     #[tokio::test]
