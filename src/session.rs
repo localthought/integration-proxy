@@ -104,9 +104,9 @@ pub struct OAuthState {
     pub pkce_verifier: String,
 }
 
-/// Stashes the `/connect` caller's `redirect_uri` in a short-lived private
-/// cookie so it survives a detour through the Google login flow, without
-/// any server-side storage.
+/// Stashes the complete relative `/connect?...` request in a short-lived
+/// private cookie, preserving platform and PKCE context through Google login.
+/// Older cookies containing only an external return URI remain readable.
 pub fn set_connect_redirect(jar: PrivateCookieJar, redirect_uri: &str) -> PrivateCookieJar {
     let cookie = Cookie::build((CONNECT_REDIRECT_COOKIE, redirect_uri.to_string()))
         .path("/")

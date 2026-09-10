@@ -134,7 +134,21 @@ pub async fn connect_page(
             Ok(Html(templates::render_connect(&params, &state.catalog.names())).into_response())
         }
         None => {
-            let jar = session::set_connect_redirect(jar, &params.redirect_uri);
+            let mut target = url::Url::parse("https://localhost/connect").unwrap();
+            target
+                .query_pairs_mut()
+                .append_pair("redirect_uri", &params.redirect_uri)
+                .append_pair("ts", &params.ts.to_string())
+                .append_pair("nonce", &params.nonce)
+                .append_pair("challenge", &params.challenge)
+                .append_pair("tenant_id", &params.tenant_id)
+                .append_pair("user_id", &params.user_id)
+                .append_pair("user_id_sig", &params.user_id_sig)
+                .append_pair("response", &params.response);
+            let jar = session::set_connect_redirect(
+                jar,
+                &format!("/connect?{}", target.query().unwrap()),
+            );
             Ok((jar, Redirect::to("/auth/login")).into_response())
         }
     }

@@ -41,6 +41,13 @@ struct Action {
 }
 
 impl Catalog {
+    #[cfg(test)]
+    pub(crate) fn for_test(platform: &str) -> Self {
+        Self {
+            documents: [(platform.into(), "{}".into())].into(),
+        }
+    }
+
     pub async fn load(path: &str, client: &reqwest::Client) -> Result<Self, String> {
         let config: CatalogConfig = serde_yaml::from_str(
             &fs::read_to_string(path).map_err(|err| format!("cannot read {path}: {err}"))?,

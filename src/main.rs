@@ -1,6 +1,7 @@
 mod auth;
 mod catalog;
 mod config;
+mod connect;
 mod oauth;
 #[allow(dead_code)] // used by the provider OAuth routes introduced with issue #9
 mod providers;
@@ -158,10 +159,9 @@ fn router(state: AppState) -> Router {
         .route("/auth/login", get(auth::login))
         .route("/auth/callback", get(auth::callback))
         .route("/auth/logout", post(auth::logout))
-        .route(
-            "/connect",
-            get(proxy::connect_page).post(proxy::connect_confirm),
-        )
+        .route("/connect", get(connect::page).post(proxy::connect_confirm))
+        .route("/connect/authorize", post(connect::authorize))
+        .route("/connect/redeem", post(connect::redeem))
         .route("/proxy", axum::routing::any(proxy::proxy))
         .route("/proxy/*path", axum::routing::any(proxy::forward))
         .route("/session", get(proxy::session_challenge))
