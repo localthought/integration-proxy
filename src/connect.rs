@@ -232,6 +232,11 @@ pub async fn page(
             request.credentials == Credentials::ConnectionAndTenantSecret,
         )),
     ));
+    // Keep the consent form's same-origin POST attributable while sending no
+    // referrer to Google or the selected provider.
+    response
+        .headers_mut()
+        .insert(header::REFERRER_POLICY, "same-origin".parse().unwrap());
     // Chrome applies form-action to redirects too, including an already-authorized
     // provider returning straight through its callback to the hub.
     let provider = crate::providers::known(&request.platform).unwrap();
@@ -509,6 +514,7 @@ mod tests {
                 .unwrap();
             assert!(policy.contains("form-action 'self' https://github.com https://hub.example"));
             assert!(!policy.contains("spotify"));
+            assert_eq!(response.headers()[header::REFERRER_POLICY], "same-origin");
         }
         let body = axum::body::to_bytes(response.into_body(), 16384)
             .await
@@ -791,6 +797,21 @@ mod tests {
                 State(s.clone()),
                 jar.clone(),
                 foreign,
+                Form(Approval {
+                    csrf: consent.csrf.clone()
+                })
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+        let mut opaque = HeaderMap::new();
+        opaque.insert(header::ORIGIN, "null".parse().unwrap());
+        assert_eq!(
+            authorize(
+                State(s.clone()),
+                jar.clone(),
+                opaque,
                 Form(Approval {
                     csrf: consent.csrf.clone()
                 })
