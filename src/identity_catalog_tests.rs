@@ -67,7 +67,7 @@ fn composed_github_identity_uses_numeric_subject_without_google_legacy_mapping()
 #[ignore = "downloads the published catalog revision and its pinned OAD sources"]
 async fn published_catalog_loads_trusted_google_and_github_identity_operations() {
     let catalog = Catalog::load(
-        "https://raw.githubusercontent.com/localthought/overlays/5d344a62e36f918a065bab1fbb7736571877673e/catalog.json",
+        "https://raw.githubusercontent.com/localthought/overlays/ecf53a4c73dfe79c5b9948709c5a048e3c05ea13/catalog.json",
         &crate::build_http_client(),
     )
     .await

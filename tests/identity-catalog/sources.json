@@ -1,29 +1,25 @@
 {
   "catalog": {
     "path": "catalog.json",
-    "sha256": "8244b8af1193be1fd16ef71b394895e3be17e19e7bb15b07ea6c8763276e397f"
+    "sha256": "69d5b6de0a471a6a2d060853846d005caf2a45d3fe37e2c6504fadd2c518d7c4"
   },
   "platforms": {
     "google-calendar": [
       {
-        "url": "https://raw.githubusercontent.com/localthought/openapi-directory/9c5cfb87b3f8b64e11069373a73e3fc85de0de5e/APIs/googleapis.com/google-calendar/v3/openapi.yaml",
-        "sha256": "093d160025a14c69479bbf30d277a19a83c696f10c3b37d81ccefeddf30f860f"
+        "url": "https://raw.githubusercontent.com/ontola/openapi-directory/32237fa5d14aa887dc9f3923395dac971e00a36c/APIs/googleapis.com/calendar/v3/openapi.yaml",
+        "sha256": "3138de999c74d8b90500fe2a5cc143436366b85aa72e8e0594bfb81d87a93b1c"
       },
       {
-        "url": "https://raw.githubusercontent.com/localthought/overlays/c844b237027e0297e40f5ff540ba041d760f862a/googleapis.com/google-calendar/v3/auth-overlay.yaml",
-        "sha256": "b03aef38c8c8ec688fcbf5d8280a27927c7f62cc3b2ba838c8b8b927bce99005"
+        "url": "https://raw.githubusercontent.com/localthought/overlays/764252190cf63ff78758ef8d576453c89b7de471/googleapis.com/google-calendar/v3/auth-overlay.yaml",
+        "sha256": "261323939077a46e13cc3cbd1473b5af03c69116e9ac5e03f07e1392e57d4813"
       },
       {
         "url": "https://raw.githubusercontent.com/localthought/overlays/d603d5453e9dc5ec26a1d7a6b9cfaeec934d5f4a/googleapis.com/google-calendar/v3/pagination-overlay.yaml",
         "sha256": "38fc738ac451a545084750d984b7ee5cd29db45b7fa8b48c346347ea8342cd84"
       },
       {
-        "url": "https://raw.githubusercontent.com/localthought/overlays/c844b237027e0297e40f5ff540ba041d760f862a/googleapis.com/google-calendar/v3/crud-causality-overlay.yaml",
-        "sha256": "03f8dcf2e65e95af791496804559b9d7b8414869b61832bf6a1da6c504e57023"
-      },
-      {
-        "url": "https://raw.githubusercontent.com/localthought/overlays/c844b237027e0297e40f5ff540ba041d760f862a/googleapis.com/google-calendar/v3/schema-overlay.yaml",
-        "sha256": "7638a04bc9a39cbe03b3b093f9f4a68222e6a08f0d309922fa14015aefe535f0"
+        "url": "https://raw.githubusercontent.com/localthought/overlays/764252190cf63ff78758ef8d576453c89b7de471/googleapis.com/google-calendar/v3/crud-causality-overlay.yaml",
+        "sha256": "10580148e35d19f9d25380d5d670c910ddb75af57ade1198f7130da77928fed5"
       },
       {
         "url": "https://raw.githubusercontent.com/localthought/overlays/ee929c625d3c63dea87bcccae932a98a33138a8f/googleapis.com/google-calendar/v3/identity-overlay.yaml",
