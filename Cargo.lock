@@ -67,14 +67,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "atomic-waker"
-version = "1.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
-
-[[package]]
-name = "auth-proxy"
+name = "atomic-integration-proxy"
 version = "0.1.0"
+source = "git+https://github.com/ontola/atomic-plugins?rev=494eb8af139b60a41e5197c92053890c0d841b2f#494eb8af139b60a41e5197c92053890c0d841b2f"
 dependencies = [
  "axum",
  "axum-extra",
@@ -93,11 +88,24 @@ dependencies = [
  "time",
  "tokio",
  "tokio-postgres",
- "tower",
  "tower-http 0.5.2",
  "tracing",
  "tracing-subscriber",
  "url",
+]
+
+[[package]]
+name = "atomic-waker"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
+
+[[package]]
+name = "auth-proxy"
+version = "0.1.0"
+dependencies = [
+ "atomic-integration-proxy",
+ "tokio",
 ]
 
 [[package]]

@@ -1,5 +1,11 @@
 name: CI
 
+# This repository is only the Heroku deployment wrapper for localthought.io.
+# The proxy itself, and its tests (including the PostgreSQL-backed ones), live
+# in ontola/atomic-plugins' integration-proxy/ and run in that repo's CI. Here
+# we only check that the wrapper builds from the committed Cargo.lock, which is
+# exactly what Heroku deploys.
+
 on:
   push:
     branches: [main]
@@ -9,25 +15,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_HOST_AUTH_METHOD: trust
-          POSTGRES_DB: connect_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      OAUTH_GITHUB_ISSUES_CLIENT_ID: fixture-client
-      OAUTH_GITHUB_ISSUES_CLIENT_SECRET: fixture-secret
-      TEST_DATABASE_URL: postgres://postgres@localhost:5432/connect_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -37,8 +26,15 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-      - name: Build
-        run: cargo build --all-targets
-      - name: Test
-        run: cargo test -- --include-ignored
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Build (release, as Heroku does)
+        run: cargo build --locked --release
+      - name: Binary exits with a configuration error when unconfigured
+        run: |
+          set +e
+          output=$(env -i PATH="$PATH" ./target/release/auth-proxy 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          test "$status" -ne 0
+          echo "$output" | grep -q '^configuration error: '
