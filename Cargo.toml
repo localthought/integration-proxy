@@ -14,13 +14,10 @@ license = "MIT"
 publish = false
 
 [dependencies]
-# Pinned to an ontola/atomic-plugins commit because the crate is not on
-# crates.io yet; cargo finds the `atomic-integration-proxy` package in that
-# repo's integration-proxy/ subdirectory by name. To deploy a newer proxy,
-# change `rev` and run `cargo update -p atomic-integration-proxy`.
-# TODO: once `atomic-integration-proxy` is published to crates.io, replace
-# this line with `atomic-integration-proxy = "0.1"` (i.e. `version = "0.1"`).
-atomic-integration-proxy = { git = "https://github.com/ontola/atomic-plugins", rev = "494eb8af139b60a41e5197c92053890c0d841b2f" }
+# Published to crates.io from ontola/atomic-plugins' integration-proxy/.
+# Bump this (and run `cargo update -p atomic-integration-proxy`) to deploy a
+# new release.
+atomic-integration-proxy = "0.2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [profile.release]
