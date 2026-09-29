@@ -12,7 +12,7 @@ What is here:
 | File | Purpose |
 | --- | --- |
 | `src/main.rs` | `atomic_integration_proxy::run().await`, nothing else. |
-| `Cargo.toml` | Package/binary `auth-proxy`, depending on `atomic-integration-proxy`. Until the crate is on crates.io this is a git dependency pinned to an `ontola/atomic-plugins` commit (`rev`). |
+| `Cargo.toml` | Package/binary `auth-proxy`, depending on `atomic-integration-proxy` from crates.io, with the lowest release this deployment needs as the version requirement. |
 | `Cargo.lock` | The exact versions Heroku builds. Commit it with every bump. |
 | `Procfile` | `web: target/release/auth-proxy`. |
 | `rust-toolchain` | `stable`, read by the `emk/rust` Heroku buildpack. |
@@ -20,8 +20,9 @@ What is here:
 
 ## Deploying a newer proxy
 
-While the dependency is a git pin: set `rev` in `Cargo.toml` to the
-`ontola/atomic-plugins` commit to deploy, then
+Once the release is on crates.io (`ontola/atomic-plugins` publishes it from
+a tag `integration-proxy-v<version>`), set the version requirement in
+`Cargo.toml` to it when this deployment depends on its behaviour, then
 
 ```sh
 cargo update -p atomic-integration-proxy
@@ -29,10 +30,6 @@ cargo build --release --locked
 ```
 
 and commit `Cargo.toml` and `Cargo.lock`. Merging to `main` deploys.
-
-Once `atomic-integration-proxy` is published, replace the git dependency with
-`atomic-integration-proxy = "0.1"`, and bump releases with
-`cargo update -p atomic-integration-proxy` alone.
 
 ## Running locally
 
