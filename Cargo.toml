@@ -17,7 +17,7 @@ publish = false
 # Published to crates.io from ontola/atomic-plugins' integration-proxy/.
 # Bump this (and run `cargo update -p atomic-integration-proxy`) to deploy a
 # new release.
-atomic-integration-proxy = "0.2"
+atomic-integration-proxy = "0.2.2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [profile.release]
