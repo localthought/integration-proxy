@@ -45,6 +45,12 @@ Without the required variables the binary exits with
 ## Catalog
 
 Unless `CATALOG_PATH` is set, the proxy loads its catalog at startup from
-`https://ontola.github.io/atomic-plugins/overlays/catalog.json`, which GitHub
-Pages publishes from `ontola/atomic-plugins`' `main`. It is not pinned to a
-commit: a restart picks up whatever `main` publishes at that moment.
+`https://ontola.github.io/atomic-plugins/overlays/catalog/2026-10-02.json`, which GitHub
+Pages publishes from `ontola/atomic-plugins`' `main`. Dated catalogs and
+the OAD-revision overlay filenames they select are immutable. Publish a new
+dated catalog and explicitly switch `CATALOG_PATH` to opt into later revisions.
+
+Version 0.2.4 checks an overlay's declared `extends` against the catalog OAD
+before applying actions. The full Discord OAD is present in this catalog;
+connection support for its mixed bot-token/OAuth schemes is tracked separately
+in ontola/atomic-plugins#258.
