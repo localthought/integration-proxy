@@ -59,15 +59,16 @@ dependencies = [
 
 [[package]]
 name = "atomic-integration-proxy"
-version = "0.2.5"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fc905daad0fc05e6d0c8cbdc865cc44fd531b23f770121e79ad70cb8faab27f"
+checksum = "1f63effacd1a864b68b6cefd260f8a62ce59e2d4de719080f6c804b07372f472"
 dependencies = [
  "axum",
  "axum-extra",
  "base64",
  "chacha20poly1305",
  "ed25519-dalek",
+ "hmac 0.12.1",
  "native-tls",
  "postgres-native-tls",
  "rand 0.8.8",
@@ -474,6 +475,7 @@ checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer 0.10.4",
  "crypto-common 0.1.7",
+ "subtle",
 ]
 
 [[package]]
@@ -695,6 +697,15 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+
+[[package]]
+name = "hmac"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
+dependencies = [
+ "digest 0.10.7",
+]
 
 [[package]]
 name = "hmac"
@@ -1332,7 +1343,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "fallible-iterator",
- "hmac",
+ "hmac 0.13.0",
  "md-5",
  "memchr",
  "rand 0.10.2",
