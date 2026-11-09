@@ -59,9 +59,9 @@ dependencies = [
 
 [[package]]
 name = "atomic-integration-proxy"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd1bd0f1f9b6dc71ca6943bfc1a56099415ee875d5291d11dbb385fb1396c4c1"
+checksum = "419ff993f19feb6a085bc2628d92b0dd69736fe3b1bfb16c7178813b1f91a9cb"
 dependencies = [
  "axum",
  "axum-extra",
